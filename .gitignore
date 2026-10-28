@@ -1,0 +1,24 @@
+# secrets
+.env
+
+# raw and stored exchange data (large; only small fixtures are committed)
+data/
+!data/.gitkeep
+
+# generated outputs
+reports/*
+!reports/.gitkeep
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+*.egg-info/
+.venv/
+
+# editors and OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
