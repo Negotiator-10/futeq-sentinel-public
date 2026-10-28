@@ -8,9 +8,11 @@ Done by Claude on 28 Oct:
 - Conda env `sentinel` (Python 3.12, 64-bit) with pandas, pyarrow, pydantic, pandera, scipy, PyYAML, requests, pytest, hypothesis, jinja2, matplotlib and python-dotenv.
 - `CLAUDE.md` (tutor mode), `PLAN.md`, `DECISIONS.md` (#001 to #005), `LEARNING.md`, `SPEC.md` skeleton, `README.md`, `.gitignore`, `.env.example`.
 - `docs/READING.md` (reading list and facts-to-verify table) and `docs/research_report.md`.
-- Private GitHub repo and first commit.
+- First local commit `d48166d`. The private GitHub repo is not created yet, because the upload needs your permission. Run this yourself from this folder:
+  `gh repo create Negotiator-10/futeq-sentinel --private --source=. --remote=origin --push`
 
 Your Week 0 tasks (Thu 29 to Sat 31 Oct):
+- [ ] Create the private GitHub repo with the command above.
 - [ ] Read the NSE Clearing FAQ (link in `docs/READING.md`). Write a one-page summary in your own words in `docs/notes_faq.md`.
 - [ ] First `LEARNING.md` entry.
 
