@@ -38,3 +38,12 @@ Append only. Each entry: the decision, why, the evidence, and the outcome.
 - **Decision:** dedicated conda env `sentinel` (Python 3.12, 64-bit).
 - **Why:** the default Python on PATH is a 32-bit 3.13 without pandas wheels.
 - **Outcome:** accepted.
+
+## #006: Start today, 29 Oct 2026
+- **Decision:** start Week 1 on Thu 29 Oct instead of Mon 2 Nov. Weeks run Thursday to Wednesday (six working days, Sunday off). Week 0 reading moves into Week 1 Day 1.
+- **New release dates:**
+  - v0.1 on Wed 11 Nov
+  - v1.0 on Wed 2 Dec
+  - Buffer from Thu 3 to Wed 9 Dec, which still includes the 7 Dec format cutover
+- **Why:** I want to start immediately.
+- **Outcome:** accepted; `PLAN.md` rewritten with the new dates.
