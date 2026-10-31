@@ -25,12 +25,22 @@ Items marked **(Claude)** are plumbing I don't do myself. Everything else is min
 - [ ] Teach-back: six beats, Why / Count / Cap / Cross / Clear / Cost
 
 ### D2 — Fri 30 Oct
-- [ ] Read paragraph 5.2 of SEBI 2025/79
-- [ ] Fix the Q2 row of `docs/notes_faq.md` from that paragraph
-- [ ] Mark the MWPL row in the `docs/READING.md` facts table as verified, citing 5.2
-- [ ] Work out one stock's MWPL by hand in Excel
+- [x] Read paragraph 5.2 of SEBI 2025/79
+- [ ] Fix the Q2 row of `docs/notes_faq.md` from that paragraph — still unchanged on disk as of 31 Oct
+- [x] Mark the MWPL row verified: `SEBI 2025/79 para 5.2.3 and 5.2.4, read 31 Oct 2026`
+- [x] Put the rows not covered by para 5.2 back to `unverified`
+- [x] Settle the floor: **10% of free float** (para 5.2.3). It binds in the worked example and
+  triples MWPL, so Claude's first answer sheet was wrong by 3x
+- [ ] New doubt for `docs/doubts.md`: para 5.2.3 compares 15% of free float (shares) with 65x ADDV
+  (rupees) but does not say which price to convert at. The engine needs an answer
+- [ ] New open row: the 80% ban exit is **not** in 2025/79 para 5.2 or 5.3. Find where it is set
+- [x] Settle the 90 vs 95 conflict: entry is 95%, exit 80%. I had written 90% and caught it myself.
+- [ ] Correct the 90% in `notes_faq.md` Q3 to 95%, in my own words
+- [ ] Fill the inputs and calculation blocks of `docs/handcalcs/mwpl_by_hand.xlsx` for a liquid stock
 - [ ] Work out that stock's utilisation by hand (market FutEq OI / MWPL)
-- [ ] Keep the numbers; they become the engine's first test case
+- [ ] Solve backwards: the FutEq OI at the ban entry threshold, at release, and today's headroom in lots
+- [ ] Repeat for an illiquid stock and note which quantity binds
+- [ ] Copy the final numbers into `docs/handcalcs/mwpl_by_hand.md` as the engine's first test case
 
 ### D3 — Sat 31 Oct
 - [ ] Read SEBI 2025/122 (intraday limits for index derivatives)
@@ -47,6 +57,10 @@ Items marked **(Claude)** are plumbing I don't do myself. Everything else is min
 
 ### D5 — Tue 3 Nov
 - [ ] Check which NSE files download without a login: bhavcopy, OI/MWPL, ban list, contract delta
+  - Evidence from 31 Oct: fetching the FAQ PDF stalled once for 120s with 0 bytes received, then
+    succeeded in 0.5s on retry, same URL and user-agent. So NSE's hosts stall intermittently rather
+    than block outright. The downloader needs a connect timeout, a total timeout, and retries with
+    backoff; "it worked once" proves nothing about tomorrow.
 - [ ] Choose Path A or Path B and log the decision in `DECISIONS.md`
 - [ ] A polite downloader, rate-limited, with a user-agent and checksums **(Claude)**
 
