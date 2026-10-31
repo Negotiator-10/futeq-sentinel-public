@@ -7,7 +7,7 @@ Read the primary source before coding each rule. Background: `docs/research_repo
   Write a one-page summary in your own words in `docs/notes_faq.md`.
 
 ## Week 1
-- **SEBI circular 2025/79 (29 May 2025):** FutEq OI, MWPL, entity limits, ban period. Find it on sebi.gov.in under Legal, then Circulars.
+- **SEBI circular 2025/79 (29 May 2025):** FutEq OI, MWPL, entity limits, ban period. Full reference `SEBI/HO/MRD/TPD-1/P/CIR/2025/79`. [SEBI page](https://www.sebi.gov.in/legal/circulars/may-2025/measures-for-enhancing-trading-convenience-and-strengthening-risk-monitoring-in-equity-derivatives_94293.html) (title: "Measures for Enhancing Trading Convenience and Strengthening Risk Monitoring in Equity Derivatives"). The MWPL definition is in paragraph 5.2; paragraph 6 has the phased implementation dates.
 - **SEBI circular 2025/122 (Sep 2025):** intraday position-limit monitoring for index derivatives. [SEBI page](https://www.sebi.gov.in/legal/circulars/sep-2025/framework-for-intraday-position-limits-monitoring-for-equity-index-derivatives_96376.html)
 - **NSE circular SURV70553:** snapshot monitoring and the SOP report layout. [PDF](https://nsearchives.nseindia.com/content/circulars/SURV70553.pdf)
 - **NSE MSD76877:** retirement of the older file formats on 7 Dec 2026. [PDF](https://nsearchives.nseindia.com/content/circulars/MSD76877.pdf)
