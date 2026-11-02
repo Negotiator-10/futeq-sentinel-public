@@ -1,0 +1,25 @@
+Item,Formula,Value,Unit,Source/note
+Item,Value,Value,Unit,Source/note
+Stock,RELIANCE,RELIANCE,,"illustrative only, not real NSE data"
+Free float,1000000000,1000000000,shares,"assumed, round number"
+Share price,1000,1000,INR per share,"assumed, round number"
+Average daily delivery value,500000000,500000000,INR per day,"assumed, round number"
+Lot size,250,250,shares per lot,"assumed, round number"
+Market FutEq OI today,19500000,19500000,shares ,"assumed, round number"
+CALCULATION,,,,
+"Quantity 1, per para 5.2",=B3*0.15,150000000,shares,
+"Quantity 2, per para 5.2",=B5*65,32500000000,INR,
+"Are B10 and B11 in the same unit? If not, convert here",=B11/B4,32500000,shares,
+"MWPL, before the floor","=MIN(B10,B12)",32500000,shares,
+Floor:wht is it percentage OF?,=B3*0.1,100000000,shares,
+"MWPL, after applying the floor","=MAX(B13,B14)",100000000,shares,
+Utilisation,=B7/B15,0.195,% of MWPL,
+BAN SCENARIOS,,,,
+FutEq OI at ban entry (95%),=B15*0.95,95000000,shares,
+FutEq OI at release (80%),=B15*0.8,80000000,shares,
+Headroom from today to ban entry,=B19-B7,75500000,shares,
+"The same headroom, expressed in LOTS",=B21/B6,302000,lots,
+CHECKS,,,,
+Is utilisation believable?,,,,
+"Which quantity binds, and why?",,,,
+Does changing B3 move B16?,,,,

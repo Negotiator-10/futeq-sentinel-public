@@ -47,5 +47,40 @@ Checked on nseindia.com on 28 Oct 2026. The file watcher must know these dates.
 
 Other dates to watch: Mon 7 Dec 2026, when NSE retires the older file formats (see `docs/READING.md`).
 
-## Next task (now)
+## Sat 31 Oct, end of day
+Verified MWPL against SEBI 2025/79 para 5.2.3: the formula has three limbs, not two, and the floor
+of 10% of free float binds in the worked example, tripling MWPL. Claude read and indexed all five
+Week 1 sources, which turned up NSE's published delta formula (SURV70553 Annexure 2) and a
+15-minute intraday cure period. Three commits pushed. Still open from Day 1: `LEARNING.md` and the
+teach-back.
+
+Working Sun 1 Nov, the scheduled day off, to pull back the slip. Tomorrow is D4's work.
+
+## Sun 1 to Mon 2 Nov: D4's work
+Excel on this laptop wants activation, so I rebuilt the MWPL sheet from scratch in a browser
+spreadsheet and worked it from memory. All eleven numbers came out right, every cell a formula
+referencing an input, every unit labelled. Hand-calculations now live in the repo as `.csv`
+alongside the `.xlsx`, because git can diff a CSV and pytest can read one.
+
+`SPEC.md` is half written: six of twelve rule rows done, each with a citation, a function name and
+a named test case. The three rows I worked myself each turned up a gap that the summaries had
+hidden:
+
+1. Para 5.2.3 compares shares against rupees and never says which price to convert at.
+2. Para 5.2.4 names no reset months, so the quarterly calendar is configuration, not a constant.
+3. Para 5.2.6 says the test is whether FutEq OI **exceeds** 95% — so a stock sitting exactly on
+   95% is not in ban.
+
+Chasing the third one closed the 80% question that had been open since 31 Oct. It is in the SEBI
+Master Circular of 30 Dec 2024, Chapter 5, clause 3.3.2.1.2.3, and the wording is "80% **or
+below**" — inclusive, the opposite of the 95% entry. The same chapter also reframed the penalty
+question: clause 3.3.2.1.2.2 sets the base and the timing but leaves the percentage to the
+exchange, so the 1% / Rs 1 lakh / Rs 5,000 figures can never be verified against SEBI. They have
+to come from an NSE circular. And clause 3.3.2.1.3 describes the 6:30 PM MWPL file, per security,
+with MWPL and OI both in number of shares — which answers part of Day 1's Q7 for free.
+
+Still open from Day 1: `LEARNING.md`, the `notes_faq.md` second passes, and the teach-back.
+`docs/doubts.md` is still empty, which is the discipline I keep deferring.
+
+## Superseded: next task as at 31 Oct morning
 Read paragraph 5.2 of SEBI circular 2025/79 (link in `docs/READING.md`) and fix the Q2 row of `docs/notes_faq.md`: both quantities that set MWPL, the floor, and the reset frequency. Then work out one stock's MWPL and utilisation by hand in Excel. That is D2's work, and it closes the biggest gap in the notes at the same time.

@@ -89,6 +89,31 @@ position creation, and entity-level limits. FutEq OI itself was already in force
     `/cmftp/common/bhavcopy`.
   - From 16 Nov 2026 the closing price is broadcast for FO via `BCAST_ENHNCD_ONLY_MBP (17208)`.
 
+- **SEBI Master Circular for Stock Exchanges and Clearing Corporations (30 Dec 2024,
+  SEBI/HO/MRD-PoD2/CIR/P/2024/00181).** The cover circular is only 4 pages; the substance is in
+  separate chapter files, which the circular's own web page does not link. Chapter 5 is the one
+  that matters.
+  - Cover: [PDF](https://www.sebi.gov.in/sebi_data/attachdocs/jan-2025/1736760771912.pdf)
+    Local: `data/sebi_master_circular_20241230.pdf`, 193,348 bytes, 4 pages,
+    `sha256 251ede452579cb403c34bab49217a2641ec8457a7471b2197e5bd1627bdd31fe`. Read 2 Nov 2026.
+  - **Chapter 5, Exchange Traded Derivatives:**
+    [PDF](https://www.sebi.gov.in/sebi_data/commondocs/dec-2024/RE_Chapter%205%20-%20Exchange%20Traded%20Derivatives%20FINAL_1_p.pdf)
+    Local: `data/sebi_master_circular_ch5_etd.pdf`, 2,136,907 bytes, 213 pages,
+    `sha256 492e59994989604db00edec95366bb2110ac589076f6aa27a78619dc240588da`. Read 2 Nov 2026.
+
+### Chapter 5 paragraph map (the clauses 2025/79 points back to)
+| Clause | What it says |
+|---|---|
+| 3.3.2.1.1 | **Old** MWPL: 20% of non-promoter (free-float) shares. Superseded for MWPL purposes by 2025/79 para 5.2.3 from 1 Oct 2025 |
+| 3.3.2.1.2.1 | End-of-day test: market-wide OI **exceeds** 95% of MWPL → from next day, trade only to decrease positions. Real-time disclosure of OI as a % of MWPL is required even though the action is EoD only |
+| 3.3.2.1.2.2 | Ban-period breach penalty: a percentage of the **increase** in position, by notional value, recovered before trading opens next day. **The Exchange sets the percentage**, not SEBI |
+| 3.3.2.1.2.3 | **Ban exit: normal trading resumes once open outstanding position comes down to "80% or below" of MWPL.** The exit boundary is inclusive; the 95% entry boundary is not |
+| 3.3.2.1.3 | The MWPL dissemination timetable: by 6:30 PM each exchange publishes, per security, ISIN, name and symbol, MWPL in number of shares, and OI in number of shares; a further file at 7:00 PM. Directly relevant to the W1 D5 feasibility check and the D6 parsers |
+
+This closes the 80% gap that was open since 31 Oct. It also shows why the engine cites two
+circulars at once: the **new** one (2025/79) for the MWPL formula, the **old** Master Circular for
+the ban exit, because 2025/79 never restated the exit.
+
 ## The delta formula is published (NSE SURV70553, Annexure 2)
 Read 31 Oct 2026. This matters for W3 D1, where the plan assumed we might have to reverse-engineer
 deltas. We do not — NSE publishes the exact method it uses:
@@ -128,9 +153,9 @@ statuses.
 |---|---|---|
 | MWPL is the lower of 15% of free float and 65x ADDV, with a floor of **10% of free float**, recalculated quarterly on rolling 3-month ADDV | **verified: SEBI 2025/79 para 5.2.3 (formula and floor) and 5.2.4 (quarterly, rolling ADDV), read 31 Oct 2026** | done |
 | Ban entry at 95% of MWPL | **verified: SEBI 2025/79 para 5.2.6 and 5.3.1, read 31 Oct 2026** | done |
-| Ban exit at 80% of MWPL | unverified — 80% does not appear in para 5.2 or 5.3 of 2025/79; find where it is set | NSE circulars; SEBI Master Circular 30 Dec 2024 |
+| Ban exit at 80% of MWPL, and the boundary is **inclusive** ("80% or below") | **verified: SEBI Master Circular 30 Dec 2024, Chapter 5, cl 3.3.2.1.2.3, read 2 Nov 2026.** Not restated in 2025/79, so it survives unchanged. Note the asymmetry against entry: entry is "exceeds 95%" (exclusive), exit is "80% or below" (inclusive) | done |
 | Entity limits of 10% (client/NRI), 20% (TM proprietary) and 30% (TM prop+client, FPI Cat I, MF) of MWPL | **verified: SEBI 2025/79 para 5.8.1, read 31 Oct 2026.** Incomplete as stated: 5.8.1.4 adds FPI Cat II (non-individual) at 20% and 5.8.1.5 FPI Cat II (individuals, family offices, corporates) at 10%. The engine needs all five categories, not three | done |
-| Penalty is the lower of 1% of the violating value and Rs 1 lakh, with a Rs 5,000 floor, per entity per stock per day | unverified — and **2025/79 does not set it**. Paras 5.3.4, 5.5.3.3 and 5.8.1.6 each delegate the penalty structure to a joint CC/exchange SOP. So the source is the NSE SOP, not the SEBI circular | NSE SURV70553 and the joint CC SOP |
+| Penalty is the lower of 1% of the violating value and Rs 1 lakh, with a Rs 5,000 floor, per entity per stock per day | **structure verified, rate still unverified.** Master Circular Ch 5 cl 3.3.2.1.2.2 (read 2 Nov 2026) sets the *base* — a percentage of the **increase** in position by notional value — and the *timing* — recovered before trading opens next day — but states that **the Exchange specifies the percentage**. So the 1% / Rs 1 lakh / Rs 5,000 figures cannot come from SEBI at all; they must come from an NSE circular. 2025/79 paras 5.3.4, 5.5.3.3 and 5.8.1.6 delegate likewise | NSE single-stock SOP (SURV70553 is the *index* one) |
 | Intraday index-option limits of Rs 5,000 cr net and Rs 10,000 cr gross, checked by at least 4 random snapshots, effective 1 Oct 2025 | **verified: SEBI 2025/122 paras 4.1, 4.2, 4.3 and 6, read 31 Oct 2026; repeated in NSE SURV70553 Annexure 1 paras 2.1, 2.2, 3.3.** There is no conflict with the Rs 1,500 cr in 2025/79 para 5.5.1.1: 1,500 is the **end-of-day** net limit, 5,000 the **intraday** net limit. Gross is 10,000 for both. One snapshot must fall between 14:45 and 15:30, and **index options only** (2025/122 para 4.10) | done |
 | A breach at an intraday snapshot gets a 15-minute cure period, except at the final 14:45-15:30 snapshot | **verified: NSE SURV70553 Annexure 1 paras 3.9 to 3.13, read 31 Oct 2026** | done |
 | Delta is Black-Scholes N(d1), repo rate as Rf, T-1 higher-of-two annualised volatility, TTE in minutes / 525600 | **verified for index options: NSE SURV70553 Annexure 2, read 31 Oct 2026.** Unverified whether the same convention applies to single stocks | NSE single-stock SOP |
