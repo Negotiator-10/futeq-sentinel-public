@@ -165,3 +165,66 @@ statuses.
 | 2025 weekly expiry-day changes (Tuesday/Thursday) | unverified | NSE and BSE circulars |
 | Older bhavcopy formats (.MS/.MD) end on 7 Dec 2026 | **verified: NSE MSD76877, read 31 Oct 2026.** Note it was revised from 16 Nov 2026, so the date has already moved once | done |
 | Penalty for a single-stock ban-period or entity-limit breach | **not found yet.** 2025/79 delegates it to a joint CC SOP (5.3.4, 5.8.1.6); SURV70553 is the *index* SOP and does not cover single stocks. There must be a separate NSE/CC circular | search NSE circulars for the single-stock FutEq SOP |
+
+---
+
+# NSE daily data files (first downloaded 2 Nov 2026)
+
+All five are public daily reports from https://www.nseindia.com/all-reports-derivatives. They
+cannot be fetched by a plain HTTP client — see `DECISIONS.md` on the 403/tarpit finding. Raw
+files live in `data/` (gitignored); only these descriptions are tracked.
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `combineoi_30102026.zip` | 22,204 | `076660e6f7452d28f497859483df13903863ec1bbfc4932b0a01737ca291211c` |
+| `combineoi_deleq_30102026.csv` | 17,900 | `5909af2cb4c5bcfd27ead7d316d34260add87f8f7460269baa8592e4f24c3d9d` |
+| `Contract_Delta_30102026.csv` | 6,605,274 | `e061da1005e0e9a5927e2e1c633cbb0bc5a433545c7095426f85c48905230db9` |
+| `fo_secban_02112026.csv` | 62 | `c793e59f34230c54c5eafae90a0d5c5e0174cdfc68b5b2e551fa3f8a5d2c3af2` |
+| `BhavCopy_NSE_FO_0_0_0_20261030_F_0000.csv.zip` | 1,066,684 | `99da5162c5e18aa4f79183a0c546780d07d5c1dedfbbcb5f1a0fbf55af28158b` |
+
+## `combineoi_<ddmmyyyy>.zip` — MWPL and utilisation, per single stock
+Archive of a CSV and an XML with the same 218 records. **Use the CSV.** The XML is not
+well-formed: its tag is `<Future Equivalent Open Interest>`, with spaces in the element name,
+which no conforming XML parser will accept.
+
+`Date, ISIN, Scrip Name, NSE Symbol, MWPL, Open Interest, Future Equivalent Open Interest,
+Limit for Next Day`
+
+This is the file clause 3.3.2.1.3 requires NSE to disseminate: ISIN, name, symbol, MWPL in
+shares, OI in shares. MWPL and both OI columns are share counts; FutEq OI is fractional.
+`Limit for Next Day` is either a number of shares or the literal `No Fresh Positions`.
+
+- Covers **single stocks only** (218 on 30 Oct). Indices are absent, because MWPL does not apply
+  to them — they are governed by the index position limits of SPEC row 13 instead.
+- **`Limit for Next Day` = 0.95 x MWPL - FutEq OI**, exact on 216 of 216 numeric rows (median
+  residual 0.5 share, rounding). It does **not** reconcile against notional OI: 0 of 216. So
+  NSE's own headroom is computed on the futures-equivalent basis, not the notional one.
+
+## `combineoi_deleq_<ddmmyyyy>.csv` — delta-equivalent OI, stocks and indices
+`Date, ISIN, Scrip Name, Symbol, Notional Open Interest, Portfolio-wise Futures Equivalent Open
+Interest`
+
+227 records: the same 218 stocks plus 9 indices (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY,
+NIFTYNXT50, SENSEX, BANKEX, NIFTYFPI, FOCIT), which carry no ISIN or scrip name.
+
+The FutEq OI column is **identical** to `combineoi`'s for all 218 shared stocks — maximum
+difference 0.00 shares. The word "Portfolio-wise" matches para 5.1's netting convention.
+
+## `Contract_Delta_<ddmmyyyy>.csv` — NSE's published per-contract deltas
+`Date, Symbol, Expiry day, Strike Price, Option Type, Delta Factor`
+
+133,620 rows for 30 Oct: every contract, every strike, every expiry. `Option Type` is `FF` for a
+future (Delta Factor exactly 1.0), otherwise the option type. Strike is 0.0 for futures.
+
+## `fo_secban_<ddmmyyyy>.csv` — the ban list
+Not a CSV with a header row. Line 1 is prose (`Securities in Ban For Trade Date 02-NOV-2026:`),
+then one `<n>,<SYMBOL>` line per banned security. A parser that calls `read_csv` on it directly
+will treat the prose line as column names.
+
+On 2 Nov: KAYNES and SAIL. These are exactly the two rows flagged `No Fresh Positions` in the
+30 Oct `combineoi` file, so the T file's last column is NSE's own T+1 ban declaration, and the
+ban forecast can be scored against it directly.
+
+## `BhavCopy_NSE_FO_..._F_0000.csv.zip` — UDiFF F&O bhavcopy
+34 columns, including `TckrSymb`, `XpryDt`, `StrkPric`, `OptnTp`, `ClsPric`, `UndrlygPric`,
+`SttlmPric`, `OpnIntrst`, `ChngInOpnIntrst`, `NewBrdLotQty`. This is the post-7-Dec format.

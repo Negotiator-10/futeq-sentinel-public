@@ -91,3 +91,31 @@ Append only. Each entry: the decision, why, the evidence, and the outcome.
 - **Evidence:** 2 Nov. My first draft of the config put the operator inside the value as the
   string `">0.15"`, which would have compared as a string and never raised.
 - **Outcome:** accepted. `Threshold` is frozen, so the engine cannot adjust a limit it was handed.
+
+## #010: NSE blocks plain HTTP clients, so acquisition is deferred, 2 Nov 2026
+- **Finding:** NSE's daily report files are public in a browser but cannot be fetched by a plain
+  HTTP client. Two distinct mechanisms, measured on 2 Nov:
+  - `https://www.nseindia.com/` returns **403 in 0.12s** to curl with an honest user-agent.
+  - Archive file paths under `nsearchives.nseindia.com` are **tarpitted**: the connection is
+    accepted, zero bytes are sent, and it is never closed. Nine consecutive requests each burned
+    their full timeout at 0 bytes.
+  - Control, same machine and same second: `https://www.sebi.gov.in/` returned **200 in 0.27s**.
+    So this is NSE policy, not a network fault.
+- **This corrects an earlier reading.** `TASKS.md` recorded a 120-second zero-byte stall on
+  31 Oct as an intermittent fault, to be handled with timeouts and backoff. It was not
+  intermittent. It is the tarpit. A downloader built on the retry assumption would have failed
+  every night and looked like a bug in my own code.
+- **What I did not do:** a probe that sent a spoofed Chrome user-agent was written and then
+  discarded. It was blocked by the permission layer and it also breaks the "clear user-agent"
+  rule in `CLAUDE.md`. Fetching through the browser pane was also tried and fails on CORS:
+  `nsearchives` is a different origin and sends no cross-origin headers.
+- **Decision:** download manually for now. The automation decision moves to Week 2 D1.
+- **Why defer rather than solve:** D6 needs parsers, and parsers need files on disk, not a
+  scheduler. Choosing how to acquire data before knowing what the data contains is the wrong
+  order - and it was the right call, because the files turned out to contain NSE's own
+  next-day headroom and per-contract deltas, which changes what is worth automating.
+- **Options for Week 2 D1:** drive a real browser engine (Playwright runs actual Chromium, which
+  is what NSE is checking for, with no spoofing); or keep manual downloads and automate only the
+  parsing. Not yet decided.
+- **Outcome:** accepted. Five files downloaded by hand on 2 Nov; checksums and column maps in
+  `docs/READING.md`.

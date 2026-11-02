@@ -159,3 +159,29 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
 - [ ] Week 4 (Thu 19 to Wed 25 Nov): validation against NSE, entity limits, alerts
 - [ ] Week 5 (Thu 26 Nov to Wed 2 Dec): OTR, reports, live page, **v1.0**
 - [ ] Week 6 (Thu 3 to Wed 9 Dec): buffer and the 7 Dec format cutover
+
+### D5 — brought forward to Mon 2 Nov
+- [x] Check which NSE files download without a login. **All five are public in a browser and none
+  fetch from a script**: 403 on the homepage, tarpit on the archive paths, SEBI fine from the same
+  machine in the same second. `DECISIONS.md` #010 **(Claude probed; the finding corrects my
+  31 Oct reading of the same symptom as an intermittent stall)**
+- [x] Five files downloaded by hand, checksums and column maps in `docs/READING.md`
+- [x] **A contract-delta file exists**: `Contract_Delta_30102026.csv`, 133,620 rows, every
+  contract every day, with Delta Factor exactly 1.0 for futures. Path A is nearly free
+- [x] **`Limit for Next Day` = 0.95 x MWPL - FutEq OI**, exact on 216/216 rows. That is cell B21
+  of the sheet I rebuilt from memory on 1 Nov. It reconciles only against FutEq OI, never
+  notional (0/216), which settles which basis NSE uses
+- [ ] **Decide Path A or Path B and log it.** Still mine. The ground has moved: both a
+  per-contract delta file and a published FutEq OI file exist, so A and B are no longer
+  alternatives - B becomes a validation layer over A, with two independent scoring keys at
+  different levels of aggregation
+- [ ] **Log the ban-state design decision in `DECISIONS.md`.** This one is mine, because it is
+  core logic. On 30 Oct SAIL was banned at 84.93% FutEq utilisation while BANDHANBNK traded
+  freely at 85.98%. So `is_in_ban()` cannot be a pure function of today's utilisation; it needs
+  yesterday's ban state as an input. Write down what that means for the engine, including how
+  day one of the pipeline gets its initial state
+- [ ] **Confirm the hysteresis explanation with data, not reasoning.** Download
+  `combineoi_<date>.zip` for 29 Oct and the days before, and find the day SAIL's FutEq
+  utilisation exceeded 95%. Until then the mechanism is inferred from the clause, not observed
+- [ ] Parser note for D6: `fo_secban` has a prose first line, not a header row, and the XML
+  inside `combineoi.zip` is not well-formed (spaces in an element name). Use the CSV
