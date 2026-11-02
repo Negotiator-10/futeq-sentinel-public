@@ -65,16 +65,19 @@ Items marked **(Claude)** are plumbing I don't do myself. Everything else is min
   in force, so "they introduced FutEq OI" is the wrong answer
 
 **Then the main job: `SPEC.md` (about 90 min)**
-- [ ] One row per rule: the clause, its citation, the function that will implement it, and the
-  test that proves it. Every citation is already in `docs/READING.md`
-- [ ] Cover: FutEq OI (5.1), MWPL and the floor (5.2.3), quarterly reset (5.2.4), ban entry at 95%
-  (5.2.6, 5.3.1), ban-period reduction with the sign rule and passive-increase carve-out (5.3.2),
-  entity limits all five categories (5.8.1), intraday limits and the 15-minute cure period
-  (2025/122 para 4, SURV70553 3.9-3.13), delta (SURV70553 Annexure 2)
-- [ ] Where a rule has no source yet, write the row anyway and mark it `UNVERIFIED`. The two known
-  gaps are the single-stock penalty and the 80% ban exit
-- [ ] While writing the ban section, work a ban entry and a ban exit by hand. That is D3's
-  hand-calculation, folded in here instead of done separately
+- [x] One row per rule: the clause, its citation, the function that will implement it, and the
+  test that proves it
+- [x] Sixteen rows, not twelve. Reading the paragraphs turned up four rules with no row at all:
+  para 5.4 (intraday MWPL monitoring for single stocks), 5.5.2 (index futures limits), 5.5.2.5
+  (the second passive-breach carve-out) and 5.5.3 (the hedge exemption)
+- [x] Rows marked `UNVERIFIED` where there is no source: the penalty rate (row 12), the ASM
+  trigger (row 15), and whether the delta convention covers single stocks (row 11)
+- [ ] **Review rows 6 to 16.** I wrote rows 1 to 5; Claude drafted 6 to 16 from the primary text at
+  my request, against the tutor rule in `CLAUDE.md`. Reviewing them is the first job next session,
+  and the row most worth arguing about is 7 — whether one function with a category argument is
+  right, or whether FPI Cat II deserves its own
+- [ ] Work a ban entry and a ban exit by hand. Still not done; rows 4 and 5 give the numbers to
+  check against
 
 **Then `config/rules.yaml` (about 60 min)**
 - [ ] Every threshold with its citation as a sibling field. No number without a source
