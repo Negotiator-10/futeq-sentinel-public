@@ -4,8 +4,13 @@ Every day's tasks, broken small enough to tick. `PLAN.md` is the strategy, `prog
 
 Items marked **(Claude)** are plumbing I don't do myself. Everything else is mine.
 
-**Do next:** Sun 1 Nov — working the scheduled day off to pull back the slip. Doing D4's work
-(`SPEC.md` and `config/rules.yaml`), with the leftover D1 items folded in. See the D4 block below.
+**Do next:** D4 is closed. `config/rules.yaml` holds 50 thresholds and the loader enforces them,
+so D5's feasibility check is the next real task. Before it, the one thing I still owe D4 is the
+review of `SPEC.md` rows 6 to 16 — the config now depends on those citations being right, so a
+wrong row is a wrong threshold with a test asserting it.
+
+**Still owed from Day 1,** and now with good material from 1-2 Nov: the first `LEARNING.md` entry,
+three entries in `docs/doubts.md`, the `notes_faq.md` second passes, and the teach-back.
 
 ---
 
@@ -80,8 +85,30 @@ Items marked **(Claude)** are plumbing I don't do myself. Everything else is min
   check against
 
 **Then `config/rules.yaml` (about 60 min)**
-- [ ] Every threshold with its citation as a sibling field. No number without a source
-- [ ] Automation 5: a validated loader **(Claude)**
+- [x] File created with the `value` / `operator` / `source` / `verified` / `note` shape, the MWPL
+  block filled as a worked example, and a stub for every other threshold **(Claude)**
+- [x] Fill the stubs. I filled all of them myself from the sixteen spec rows. The regulatory facts
+  came out largely right and the encoding came out wrong in five repeated ways — see the note at
+  the top of `rules.yaml`. **Claude then rewrote the file at my instruction,** which is the third
+  departure from the tutor rule this week and the one I should least have asked for, because these
+  numbers are the core of the project
+- [x] Add `operator` wherever the wording makes a boundary inclusive or exclusive
+- [x] Leave the three `meta.unverified` entries null, each with its reason
+- [x] Automation 5: a validated loader. `src/sentinel/rules.py`, 50 thresholds loaded, 34 tests,
+  all passing. Also `pyproject.toml`, so `pytest` works from the root with no install **(Claude)**
+- [ ] **Re-derive five thresholds from memory, into a blank file, and diff against `rules.yaml`.**
+  Entry, exit, the three index futures shares and the Rs 500 cr floor. This replaces the writing
+  Claude did for me. If I cannot reproduce them, I do not know them
+- [ ] Read `src/sentinel/rules.py` and answer two questions: why does `Threshold.compare()` raise
+  when no operator is declared, instead of defaulting to `>`? And why is `verified: "2026-11-02"`
+  in quotes an error rather than a convenience?
+
+**What the config exercise actually taught me, 2 Nov**
+- [ ] Add to `LEARNING.md`: the five encoding classes, and specifically that
+  `minutes_in_year: 8,670` would not have crashed. Every other mistake in that file broke loudly.
+  That one would have corrupted every option delta by about sixty times and produced output that
+  looked exactly like correct output. The lesson is not "be careful with YAML" — it is that the
+  dangerous errors are the ones that still run
 
 **Then (30 min)**
 - [ ] Teach-back, using the six-beat spine

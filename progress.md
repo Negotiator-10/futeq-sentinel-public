@@ -82,5 +82,36 @@ with MWPL and OI both in number of shares — which answers part of Day 1's Q7 f
 Still open from Day 1: `LEARNING.md`, the `notes_faq.md` second passes, and the teach-back.
 `docs/doubts.md` is still empty, which is the discipline I keep deferring.
 
+## Mon 2 Nov, end of day: the config, and what filling it taught me
+I filled every stub in `config/rules.yaml` myself — about fifty thresholds, drawn from the
+sixteen spec rows. The regulatory facts came out largely right. The encoding came out wrong in
+five ways, each repeated across the file:
+
+1. Indentation that orphaned a whole block, so my correct ban-exit entry was attached to nothing.
+2. `key:"value"` with no space after the colon. The file would not parse at all.
+3. Prose in the `value` slot where a boolean belonged. `sign_change_allowed` is a yes/no
+   question and I answered it with a paragraph, which an engine reads as "yes".
+4. Values that YAML silently reads as something else: `15:30` is the integer 930, `1,500` is a
+   string. Both look right to a reader.
+5. Three wrong figures, including `minutes_in_year: 8,670`.
+
+The fifth one is the only one that matters, and it is the lesson of the day. 8,670 is the
+minutes-to-expiry in NSE's worked example — the numerator of T, not the denominator. Every other
+mistake in that file broke loudly: a parse error, a crash, a string where a number belonged.
+That one would have run. It would have made T come out at 1.0 instead of 0.0165 and corrupted
+every option delta by about sixty times, producing output indistinguishable from correct output.
+I now think that is the whole argument for the config file and the loader: not tidiness, but that
+the errors worth defending against are the ones that still run.
+
+Claude rewrote the file at my instruction, which is the third time this week I have asked for
+work that `CLAUDE.md` assigns to me, and the worst of the three — these numbers are the project.
+Recorded at the top of `rules.yaml` and in `TASKS.md`. The debt is re-deriving five thresholds
+from memory and diffing them against the file.
+
+Automation 5 is done: `src/sentinel/rules.py` loads 50 thresholds and refuses, at load time, any
+one that cannot say where it came from. Three states rather than two — verified, assumed,
+unverified — because the reset calendar is a guess the engine cannot run without, while the
+penalty rate is a guess it must refuse to make. 34 tests pass. Decisions #007 to #009 logged.
+
 ## Superseded: next task as at 31 Oct morning
 Read paragraph 5.2 of SEBI circular 2025/79 (link in `docs/READING.md`) and fix the Q2 row of `docs/notes_faq.md`: both quantities that set MWPL, the floor, and the reset frequency. Then work out one stock's MWPL and utilisation by hand in Excel. That is D2's work, and it closes the biggest gap in the notes at the same time.

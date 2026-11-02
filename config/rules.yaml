@@ -1,0 +1,383 @@
+# Thresholds for the FutEq Sentinel engine.
+#
+# Every number the engine applies lives here, never in code. Every number carries its own
+# source and the date I read it, as sibling fields, so a reviewer can check any threshold
+# without opening the code and without trusting me.
+#
+# Shape of an entry. No exceptions, anywhere in the file:
+#   key:
+#     value:    the number or flag, as the engine uses it (fractions, not percents)
+#     operator: how the comparison is made, where a boundary has a direction. Omit otherwise
+#     source:   circular and paragraph. Never "SEBI", never "the FAQ"
+#     verified: the date I read that paragraph, or null when the source is an ASSUMPTION
+#     note:     anything a reader would otherwise get wrong. Prose belongs here, never in `value`
+#
+# `operator` exists because of what 2 Nov turned up: ban entry is "exceeds 95%" and ban exit is
+# "80% or below". The two boundaries are inclusive in opposite directions, so the direction is
+# data, not something to be remembered while writing an if-statement. It encodes the direction of
+# a boundary only. "Higher of X or Y" is not an operator, it is two limbs and a MAX - see the
+# `mwpl` block for the shape, and `index.futures`, which has the same shape for the same reason.
+#
+# Three states a threshold can be in, and the loader treats them differently:
+#   verified: <date>           usable
+#   verified: null, with an    usable, but the loader warns and tags it `assumed`. The source must
+#     ASSUMPTION source        begin with "ASSUMPTION", so this can never happen by omission
+#   listed in meta.unverified  value is null and the loader REFUSES to evaluate it. A null with a
+#                              reason is a finding; a plausible number is a liability
+#
+# Rows referenced below are rows of the table in SPEC.md.
+#
+# Authorship, recorded for the same reason it is recorded in SPEC.md: I filled the stubs below
+# myself and then asked Claude to correct them. Claude rewrote the file on 2 Nov 2026. My own
+# attempt had the regulatory facts largely right and the encoding wrong in five repeated ways:
+# indentation that orphaned a block, `key:"value"` with no space after the colon, prose in the
+# `value` slot where a boolean belonged, unquoted values that YAML reads as something else
+# (`15:30` is the integer 930, `1,500` is a string), and three wrong figures - the worst being
+# minutes-in-a-year as 8,670 instead of 525,600, which would not have crashed. It would have made
+# every option delta wrong by a factor of sixty, silently. That is the lesson of this file, and it
+# is why the loader exists.
+#
+# The numbers for rows 6 to 16 are drawn from SPEC.md rows that Claude drafted and I have not yet
+# reviewed. Until that review is done, treat the citations in those blocks as second-hand.
+
+meta:
+  spec: SPEC.md
+  reading_list: docs/READING.md
+  # Rules whose source is still unknown are listed here rather than given a plausible number.
+  # The loader treats anything in this list as unavailable and refuses to evaluate it.
+  # Each name is the full dotted path of the threshold, so the loader can check the list against
+  # the tree and fail if the two drift apart.
+  unverified:
+    - single_stock.ban.penalty_rate              # row 12. SEBI delegates the rate to the exchange
+    - single_stock.intraday_mwpl.asm_trigger     # row 15. Para 5.4.1.1 says only "certain limits"
+    - mechanics.delta.single_stock_convention    # row 11. Annexure 2 is verified for index only
+
+# ---------------------------------------------------------------------------
+# SINGLE STOCKS
+# ---------------------------------------------------------------------------
+
+single_stock:
+
+  # Row 1. Three limbs: MAX( MIN(15% of free float, 65 x ADDV), 10% of free float ).
+  # The two inner limbs are in different units, so one must be converted before they are compared.
+  mwpl:
+    free_float_share:
+      value: 0.15
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.2.3"
+      verified: 2026-10-31
+      note: "A share count. Compare with addv_multiple only after converting to one unit."
+    addv_multiple:
+      value: 65
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.2.3"
+      verified: 2026-10-31
+      note: "A rupee value. Para 5.2.3 does not say which price to convert at - see SPEC.md Unknowns."
+    floor_free_float_share:
+      value: 0.10
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.2.3"
+      verified: 2026-10-31
+      note: "The floor. It binds for a large stock with thin delivery and tripled MWPL in the hand-calculation."
+    recalculation_months:
+      value: 3
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.2.4"
+      verified: 2026-10-31
+      note: "Rolling ADDV over the preceding three months. The circular names no reset MONTHS, so reset_calendar below is an assumption, not a citation."
+    reset_calendar:
+      value: [1, 4, 7, 10]
+      source: "ASSUMPTION - not in any circular I have read"
+      verified: null
+      note: "Calendar quarters. Row 3's test depends on this. If NSE resets on a different cycle, every MWPL between resets is wrong."
+
+  # Row 2. No threshold, but a real behavioural switch: three implementations are plausible and
+  # row 2's test distinguishes all three, so the convention is configuration.
+  futeq_oi:
+    aggregation:
+      value: "net_within_ucc_gross_across"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.1"
+      verified: 2026-10-31
+      note: "UCC A long 100 / short 60 nets to 40; UCC B long 30 stays 30; market total 70. Netting across UCCs gives 10 and grossing everything gives 130, so the number distinguishes all three implementations."
+
+  # Rows 4, 5, 6 and 12.
+  ban:
+    entry_utilisation:
+      value: 0.95
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.2.6"
+      verified: 2026-11-02
+      note: "The wording is 'exceeds 95%', so a scrip sitting exactly at 95% is NOT in ban. Upstream rule: SEBI/HO/MRD-PoD2/CIR/P/2024/00181, Ch 5, cl 3.3.2.1.2.1."
+    exit_utilisation:
+      value: 0.80
+      operator: "<="
+      source: "SEBI/HO/MRD-PoD2/CIR/P/2024/00181 (Master Circular 30 Dec 2024), Ch 5, cl 3.3.2.1.2.3"
+      verified: 2026-11-02
+      note: "Normal trading resumes once UTILISATION - not the price - comes down to 80% or below. 'Or below' makes this boundary inclusive, the opposite of entry's 'exceeds'. Not restated in 2025/79, so it survives unchanged."
+    tested_at:
+      value: "end_of_day"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.2.6 (the test), 5.3.1 (the consequence)"
+      verified: 2026-11-02
+      note: "An intraday peak above 95% that closes below does not trigger a ban. Real-time disclosure of utilisation is still required even though the action is EoD only - that is intraday_mwpl below, a separate obligation with a separate purpose."
+    sign_change_allowed:
+      value: false
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.3.2, illustrated by Table 2 in para 5.3.3"
+      verified: 2026-11-02
+      note: "Once a scrip is in ban, any trading must reduce FutEq OI on an end-of-day basis. An EoD delta of +10 may be brought down to +4 or to 0. Going to -5 is NOT an acceptable reduction, although the magnitude fell, because the sign changed."
+    passive_increase_is_breach:
+      value: false
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.3.2, Table 2 day 2"
+      verified: 2026-11-02
+      note: "One long futures lot held with no trades, underlying up 5%, EoD delta rises: permitted. Two EoD snapshots cannot tell this from an active increase, so check_ban_period_reduction() needs the entity's FILLS, not just its holdings. See SPEC.md, 'The one finding that changes the data pipeline'."
+    active_increase_is_breach:
+      value: true
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.3.2, Table 2 day 5"
+      verified: 2026-11-02
+      note: "A second lot bought during a ban: not permitted. Same arithmetic as the row above, different cause, opposite answer."
+    penalty_rate:
+      value: null
+      source: "UNVERIFIED. Structure is SEBI/HO/MRD-PoD2/CIR/P/2024/00181 Ch 5 cl 3.3.2.1.2.2, read 2 Nov 2026; the RATE is set by the Exchange, not by SEBI"
+      verified: null
+      note: "Listed in meta.unverified, so the loader refuses to evaluate it. It can never be verified against SEBI - 2025/79 paras 5.3.4, 5.5.3.3 and 5.8.1.6 delegate likewise. It has to come from an NSE circular, which I have not yet found."
+    penalty_base:
+      value: "increase"
+      source: "SEBI/HO/MRD-PoD2/CIR/P/2024/00181 (Master Circular 30 Dec 2024), Ch 5, cl 3.3.2.1.2.2"
+      verified: 2026-11-02
+      note: "A client holding 1,000 lots who adds 10 is penalised on the notional value of the 10, not the 1,010. Testable even with the rate unknown."
+    penalty_recovered_by:
+      value: "before_next_day_trading_opens"
+      source: "SEBI/HO/MRD-PoD2/CIR/P/2024/00181 (Master Circular 30 Dec 2024), Ch 5, cl 3.3.2.1.2.2"
+      verified: 2026-11-02
+      note: "The timing is set even though the rate is not."
+
+  # Row 7. Combined futures and options, per entity, as a fraction of MWPL, in five categories.
+  # Every one of the seven carries its own source even though all seven come from one paragraph
+  # range. One rule with no exceptions is what makes the loader worth trusting - see DECISIONS #007.
+  entity_limits:
+    client_nri:
+      value: 0.10
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.8.1.1"
+      verified: 2026-11-02
+      note: "Clients and NRIs."
+    tm_proprietary:
+      value: 0.20
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.8.1.2"
+      verified: 2026-11-02
+      note: "A trading member's own book only."
+    tm_prop_plus_client:
+      value: 0.30
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.8.1.3"
+      verified: 2026-11-02
+      note: "A trading member's proprietary and client positions together."
+    fpi_cat_1:
+      value: 0.30
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.8.1.3"
+      verified: 2026-11-02
+      note: "Category I FPIs sit at the same 30% as a TM's combined book."
+    mutual_fund:
+      value: 0.30
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.8.1.3"
+      verified: 2026-11-02
+      note: "Mutual funds, same 30%."
+    fpi_cat_2_other:
+      value: 0.20
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.8.1.4"
+      verified: 2026-11-02
+      note: "Category II FPIs OTHER than individuals, family offices and corporates."
+    fpi_cat_2_individual_family_corporate:
+      value: 0.10
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.8.1.5"
+      verified: 2026-11-02
+      note: "The SUB-category decides. Collapsing Cat II to one number is the likely bug: the same position breaches at 10% here and not at the 20% above."
+
+  # Row 15. A separate obligation from ban entry, which is EoD only.
+  intraday_mwpl:
+    min_snapshots_per_session:
+      value: 4
+      operator: ">="
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.4.1; effective 3 Nov 2025 per para 6"
+      verified: 2026-11-02
+      note: "Intraday MWPL utilisation for single stocks is monitored at least four random times per session. Utilisation peaking at 97% at 11:00 and closing at 92% is no ban, but the day's report must still show 97%."
+    asm_trigger:
+      value: null
+      source: "UNVERIFIED. Para 5.4.1.1 says only 'certain limits' and leaves the numbers to the exchange SOP"
+      verified: null
+      note: "Listed in meta.unverified. The purposes are named - Additional Surveillance Margin, entity concentration checks, fortnightly reporting to SEBI - but not a single number."
+
+# ---------------------------------------------------------------------------
+# INDEX DERIVATIVES
+# ---------------------------------------------------------------------------
+
+index:
+
+  # Row 8. PAN level, end of day. Rupee crore.
+  options_eod:
+    net_futeq_oi_cr:
+      value: 1500
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.5.1.1"
+      verified: 2026-11-02
+      note: "Rupee crore of FutEq OI, net."
+    gross_futeq_oi_cr:
+      value: 10000
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.5.1.1"
+      verified: 2026-11-02
+      note: "Rupee crore of FutEq OI, gross."
+    gross_applies_per_side:
+      value: true
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.5.1.1"
+      verified: 2026-11-02
+      note: "Two one-sided tests, not one combined number. Gross long 9,900 cr with gross short 10,100 cr is a breach, even though the net is -200 cr and far inside 1,500 cr. Testing gross as a single combined number misses it."
+
+  # Row 9. Different limits from EoD, and they apply separately per index.
+  options_intraday:
+    net_futeq_oi_cr:
+      value: 5000
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/122 paras 4.1 to 4.4"
+      verified: 2026-11-02
+      note: "More than triple the EoD net limit. Net 4,900 cr at a snapshot is no breach, although it is far above the 1,500 cr that applies at EoD."
+    gross_futeq_oi_cr:
+      value: 10000
+      operator: ">"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/122 paras 4.1 to 4.4"
+      verified: 2026-11-02
+      note: "The same number as the EoD gross limit, which is why the two blocks must stay separate - a shared constant would hide that the net limits differ."
+    min_snapshots:
+      value: 4
+      operator: ">="
+      source: "NSE SURV70553 Annexure 1 paras 2.1, 2.2, 3.2, 3.3"
+      verified: 2026-11-02
+      note: "At least four random snapshots, one of which must fall in the closing window below. The underlying price is taken at snapshot time."
+    closing_snapshot_window:
+      value: ["14:45", "15:30"]
+      source: "NSE SURV70553 Annexure 1 paras 3.2, 3.3"
+      verified: 2026-11-02
+      note: "A window needs two ends. Quoted, because YAML reads an unquoted 15:30 as the integer 930 (sexagesimal). One snapshot must fall inside it, and the cure period does not apply there - see mechanics.cure_period."
+    per_index:
+      value: true
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/122 paras 4.1 to 4.4"
+      verified: 2026-11-02
+      note: "Separately for each index. 4,000 cr on one index plus 4,000 cr on another is not an 8,000 cr breach."
+
+  # Row 13. "Higher of a percentage of that index's futures OI, or a rupee floor", on gross notional.
+  # Structurally identical to single_stock.mwpl: two limbs and a MAX, not a comparison. There is no
+  # operator here. Implementing it as just the percentage is the same bug as dropping the MWPL floor.
+  futures:
+    fpi_cat_1_mf_tm_prop_client_share:
+      value: 0.15
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 paras 5.5.2.1 to 5.5.2.4"
+      verified: 2026-11-02
+      note: "FPI Cat I, mutual funds, TM proprietary and clients. A share of that index's futures OI."
+    fpi_cat_2_other_share:
+      value: 0.10
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 paras 5.5.2.1 to 5.5.2.4"
+      verified: 2026-11-02
+      note: "FPI Cat II other than individuals, family offices and corporates."
+    fpi_cat_2_individual_family_corporate_share:
+      value: 0.05
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 paras 5.5.2.1 to 5.5.2.4"
+      verified: 2026-11-02
+      note: "FPI Cat II individuals, family offices and corporates."
+    floor_cr:
+      value: 500
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 paras 5.5.2.1 to 5.5.2.4"
+      verified: 2026-11-02
+      note: "Rs 500 crore, the same floor in all three categories. At index futures OI of 2,000 cr, 15% is 300 cr, so the limit is 500 cr and not 300 cr."
+
+  # Row 14. The second passive carve-out, parallel to single_stock.ban.passive_increase_is_breach.
+  passive_breach:
+    measured_against_previous_day_oi:
+      value: true
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 paras 5.5.2.5.1 to 5.5.2.5.3"
+      verified: 2026-11-02
+      note: "Position limits are measured against the previous day's total market OI, not today's."
+    oi_drop_is_violation:
+      value: false
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 paras 5.5.2.5.1 to 5.5.2.5.3"
+      verified: 2026-11-02
+      note: "Day 1 market futures OI 10,000 cr, 15% limit 1,500 cr, entity holds 1,400 cr, compliant. Day 2 market OI falls to 8,000 cr, limit 1,200 cr, entity unchanged at 1,400 cr: an arithmetic breach and NOT a violation. A breach needs a reason, not a boolean."
+
+  # Row 16. Extra exposure allowed against holdings, beyond the index limits above.
+  hedge_exemption:
+    short_measured_against:
+      value: ["stock_holdings"]
+      operator: "<="
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.5.3.1; applied to intraday by NSE SURV70553 Annexure 1 para 2.3"
+      verified: 2026-11-02
+      note: "Aggregate short index positions may not exceed the entity's stock holdings."
+    long_measured_against:
+      value: ["cash", "cash_equivalents", "government_securities", "treasury_bills"]
+      operator: "<="
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.5.3.2; applied to intraday by NSE SURV70553 Annexure 1 para 2.3"
+      verified: 2026-11-02
+      note: "Aggregate long index positions may not exceed cash, cash equivalents, government securities and T-bills. An entity 200 cr over the gross short limit with 300 cr of stock holdings is not in breach; with 100 cr of holdings it is in breach by 100 cr."
+
+# ---------------------------------------------------------------------------
+# MECHANICS
+# ---------------------------------------------------------------------------
+
+mechanics:
+
+  # Row 10. How an intraday breach is classified.
+  cure_period:
+    minutes:
+      value: 15
+      source: "NSE SURV70553 Annexure 1 paras 3.9 to 3.13"
+      verified: 2026-10-31
+      note: "A breach seen at a random snapshot gets a second snapshot 15 minutes later. Breach at 11:00 and clear at 11:15 is no provisional breach; a breach at both is provisional."
+    applies_to_closing_snapshot:
+      value: false
+      source: "NSE SURV70553 Annexure 1 paras 3.9 to 3.13"
+      verified: 2026-10-31
+      note: "The cure period does NOT apply to the final snapshot of the day, 14:45 to 15:30. A breach at 15:00 is provisional immediately, with no second snapshot."
+    provisional_becomes_final_after_holdings:
+      value: true
+      source: "NSE SURV70553 Annexure 1 para 3.12"
+      verified: 2026-10-31
+      note: "Provisional is notified to the TM/CM and the client by EoD or T+1, and becomes final only after allowing holdings under index.hedge_exemption."
+
+  # Row 11. FutEq per contract:
+  #   futures = 1, call = N(d1), put = N(d1) - 1
+  #   d1 = { ln(S/K) + (Rf + 0.5 * sigma^2) * T } / ( sigma * sqrt(T) )
+  # S is the real-time underlying at the snapshot.
+  delta:
+    futures:
+      value: 1
+      source: "NSE SURV70553 Annexure 2"
+      verified: 2026-10-31
+      note: "Exactly one, not a computed number."
+    risk_free_rate_source:
+      value: "rbi_repo_latest"
+      source: "NSE SURV70553 Annexure 2"
+      verified: 2026-10-31
+      note: "Rf is the latest RBI repo rate. Not a bond yield, not MIBOR."
+    volatility_basis:
+      value: "t_minus_1_eod_higher_of_underlying_and_futures_annualised"
+      source: "NSE SURV70553 Annexure 2"
+      verified: 2026-10-31
+      note: "Historical, not implied, and the HIGHER of two series, taken at T-1 EOD. This is Black-Scholes with historical vol, not Black-76 with implied vol - see the open question against PLAN.md W3 D1."
+    minutes_in_year:
+      value: 525600
+      source: "NSE SURV70553 Annexure 2"
+      verified: 2026-10-31
+      note: "365 x 24 x 60, the DENOMINATOR of T. My first attempt put 8,670 here, which is the minutes-to-expiry in NSE's worked example - the numerator. That error does not crash: it makes T come out at 1.0 instead of 0.0165 and corrupts every option delta by about sixty times, silently."
+    expiry_day_end_time:
+      value: "15:30"
+      source: "NSE SURV70553 Annexure 2"
+      verified: 2026-10-31
+      note: "Calendar days count midnight to midnight; expiry day counts midnight to 15:30. NSE's worked example: 15:00:05 on 24 Sep 2025 for a 30 Sep 2025 expiry gives 540 + 7,200 + 930 = 8,670 minutes, T = 8,670 / 525,600 = 0.0165. NSE published that number, so it cannot be argued with."
+    truncate_to:
+      value: "previous_whole_minute"
+      source: "NSE SURV70553 Annexure 2"
+      verified: 2026-10-31
+      note: "15:00:05 and 15:00:59 give the same T. The seconds are dropped, not rounded."
+    single_stock_convention:
+      value: null
+      source: "UNVERIFIED. Annexure 2 is verified for INDEX options only; whether the same convention binds for single stocks is not stated anywhere I have read"
+      verified: null
+      note: "Listed in meta.unverified. The engine must not silently assume the index convention carries over to single stocks - that assumption would be invisible in every single-stock delta it produced."
