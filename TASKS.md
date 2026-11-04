@@ -186,8 +186,13 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
 - [ ] **Repayment for #011:** re-derive all four answers from memory into a blank file and
   diff against the entry, then rewrite the Decision paragraph myself without reading Claude's.
   Four specific tests are listed at the bottom of #011. First job next session
-- [ ] **Update `SPEC.md` rows 4 and 5:** `is_in_ban()` now takes three arguments, not two.
-  The rows still describe a two-argument function
+- [x] **Update `SPEC.md` rows 4 and 5:** done 4 Nov. Both now carry
+  `is_in_ban(futeq_oi, mwpl, was_in_ban_yesterday)`, a note that the third argument selects
+  which threshold applies, and two new named tests - one that the 95% entry threshold is not
+  applied to a scrip already in ban, and `test_two_scrips_same_utilisation_opposite_state`
+  built from the real SAIL and BANDHANBNK rows. Also closed the `Contract_Delta` unknown and
+  logged two new ones (ISIN stability under corporate actions, and seed disagreement between
+  `fo_secban` and `combineoi`)
 - [ ] **Update `PLAN.md` W2:** the runner needs a dated, ISIN-keyed ban-state store, and the
   synthetic prop book needs trades, not just end-of-day holdings (the row 6 finding). Both are
   the same point: a breach needs a reason, not a boolean
