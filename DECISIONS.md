@@ -119,3 +119,249 @@ Append only. Each entry: the decision, why, the evidence, and the outcome.
   parsing. Not yet decided.
 - **Outcome:** accepted. Five files downloaded by hand on 2 Nov; checksums and column maps in
   `docs/READING.md`.
+
+## #011: Ban state between days, 2 to 4 Nov 2026
+<!-- Authorship, recorded for the same reason it is recorded in SPEC.md and rules.yaml.
+     The reasoning in all four answers is mine, worked out against the data on 2 and 4 Nov.
+     Claude transcribed it, and in three places did more than transcribe:
+       - Q2: supplied the index answer, which I had not attempted, and corrected a factual
+         error about which files carry an ISIN - an error Claude had itself introduced in
+         this file's own prompt text, which I then repeated.
+       - Q3: my first answer carried a warm-up replay over from my VaR engine, where it is
+         correct. Claude showed with a 19-of-20 counterexample why it is impossible here.
+       - Q4: my first answer was scoped to blocking orders, which this engine never sees.
+         Claude remapped it to a monitoring system; the three arguments are unchanged.
+     Claude also wrote the Decision paragraph as a synthesis of the four answers.
+     The pattern in Q3 and Q4 is the same and is worth naming: sound reasoning aimed at
+     the wrong system. The repayment is at the bottom. -->
+
+- **1. The signature of `is_in_ban()`:**
+
+  ```python
+  def is_in_ban(futeq_oi, mwpl, was_in_ban_yesterday) -> bool:
+  ```
+
+  Three arguments, because two are provably insufficient. On 30 Oct, SAIL sat at 84.93%
+  utilisation and was banned while BANDHANBNK sat at 85.98% and traded freely. A function
+  given only `(futeq_oi, mwpl)` receives near-identical inputs for those two rows and must
+  return opposite answers, which no implementation can do. The missing input is not extra
+  information for its own sake: it is the thing that **selects which threshold applies.**
+  A scrip already in ban is measured against the 80% exit; one still free is measured
+  against the 95% entry. One utilisation, two thresholds, and nothing in the first two
+  arguments says which to use.
+
+  The return is `bool` because tonight's output becomes tomorrow's `was_in_ban_yesterday`.
+  Output type must equal input type, which means this is not a predicate at all - it is a
+  state transition, and the function is one step of a state machine.
+
+  **Known limitation, deliberately not solved yet.** A bare `bool` discards the reason. A
+  scrip banned tonight for the first time and a scrip still banned and holding above 80%
+  both return `True`, and the alert text for those is not the same sentence. Revisit when
+  the alerting work starts in Week 4.
+
+  **Rejected:** `(futeq_oi, mwpl, yesterday_utilisation)` - a number is not a state. SAIL's
+  utilisation yesterday was also in the eighties, as was BANDHANBNK's, so the ambiguity
+  survives one day older, and resolving it needs the day before that. There is no bottom.
+
+  **Rejected:** `(futeq_oi, mwpl, threshold)` - this does not solve the problem, it relocates
+  it. Choosing between 0.95 and 0.80 requires knowing whether the scrip is in ban, which is
+  the question the function exists to answer. The caller would need the answer to ask.
+
+- **2. What the state is keyed on:**
+
+  **Key on ISIN, never on symbol. Store the symbol alongside as a check.**
+
+  The symbol is the field that gets renamed (ZOMATO to ETERNAL) and reused (a freed ticker
+  later assigned to a different company). Those are two different bugs. A rename silently
+  cold-starts the model for that scrip; a reuse silently hands one company's risk history to
+  another. Neither raises an error, and both produce wrong alerts that look right. The ISIN
+  is not reused, so it is the safe key.
+
+  Every alert, report and conversation uses the symbol, so the record carries both fields.
+  Keying and displaying are different decisions, and conflating them is why people end up
+  keying on the readable field.
+
+  **How the seed resolves, which is where this gets awkward.** `fo_secban` is the only file
+  that can seed day one, and it carries **no ISIN** - 62 bytes, symbols only, not even a
+  header row. So symbol-to-ISIN must be resolved through the same day's `combineoi`, which
+  carries both. The consequence is a real constraint on question 3: **the ban-state store
+  cannot be seeded from the ban list alone.** It needs the ban list and a `combineoi` for a
+  date close enough to resolve every symbol in it.
+
+  If a symbol in the ban list does not resolve, **raise and stop the run.** Do not skip the
+  row. A banned scrip that cannot be identified is the worst thing to drop silently, because
+  it under-reports a real ban, and that is the error direction that gets a desk fined. Same
+  discipline as `src/sentinel/rules.py` refusing on `penalty_rate`: when the engine does not
+  know, it says so loudly.
+
+  **The nine indices are refused, not stored.** NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY,
+  NIFTYNXT50, SENSEX, BANKEX, NIFTYFPI and FOCIT all carry `ISIN = NA` in
+  `combineoi_deleq`, and they are absent from `combineoi` altogether. That absence is not an
+  oversight in the file: MWPL does not apply to indices, which are governed instead by the
+  index position limits of `SPEC.md` row 13. A store keyed on ISIN cannot hold a row with no
+  ISIN, and a store that accepts rows it cannot key will one day return the wrong one. So
+  this store rejects them. The corollary is worth stating plainly, because it will look like
+  a missing feature in Week 4: **there is no such thing as ban state for an index.** Ban
+  periods are a single-stock mechanism.
+
+  **One open claim, marked `unverified`.** A security may be issued a new ISIN after a
+  corporate action, in which case state has to be carried across the old-to-new mapping
+  deliberately or it cold-starts anyway. I believe face-value splits can do this; I have not
+  checked, and the counter-recollection is that Indian splits usually retain the ISIN while
+  new ISINs come from partly-paid conversions and demergers. **What would settle it:** an NSE
+  circular on ISIN assignment for corporate actions. Until then this is a flagged risk, not a
+  design input, held to the same standard as every threshold in `config/rules.yaml`.
+
+  **The date-effective symbol-to-ISIN table is buildable from files already downloaded.**
+  `combineoi` gives ISIN and NSE Symbol per day, so accumulating it daily produces the
+  mapping with effective dates for free. No new data source is needed.
+
+- **3. Day one, and after a gap:**
+
+  **Day one seeds from `fo_secban`. There is no warm-up that can replace it.**
+
+  My first attempt at this answer said the opposite - start from a fixed date with enough
+  history and replay forward, no special seed step - which I had carried over from my VaR
+  engine, where it is correct. It is impossible here, and the reason is the most useful thing
+  I learned today.
+
+  A GARCH variance seeded wrongly **decays** toward the truth. Feed it correct returns and a
+  10x initial error falls monotonically - 9.45x, 5.85x, 2.80x over twenty days, half-life
+  about 6.6 days at beta 0.90 - with no intervention. That is what makes a warm-up window
+  legitimate there.
+
+  A ban flag seeded wrongly **latches**. Running the same utilisation path from both seeds,
+  the two runs disagreed on **19 of 20 days**. They agreed only on the last day, and not
+  because the system corrected itself: utilisation happened to fall below the 80% exit, which
+  forces both runs to the same answer regardless of where they started. The state was not
+  repaired, it was overwritten by an unrelated event. Had utilisation stayed in the eighties
+  all month, the two runs would still disagree and nothing in the data could say which was
+  right.
+
+  The reason there is no restoring force: 0.95 and 0.80 form a deadband, and inside it the
+  flag depends only on itself - `util > EXIT if was_in_ban else util > ENTRY`. Each day's
+  answer is yesterday's answer propagated. It is a memory cell, not an estimator. Estimators
+  forget their initial conditions; memory cells are built not to.
+
+  **The test that tells the two apart,** worth keeping for any carried state I design later:
+  run the same inputs from two different initial states. If they converge, the state decays
+  and a warm-up is legitimate. If they diverge, the state latches and it must be seeded from
+  an observation.
+
+  So the only ground truth about ban state is NSE publishing it. Day one reads `fo_secban`,
+  and - per question 2 - also needs a `combineoi` close enough in date to resolve those
+  symbols to ISINs.
+
+  **After a gap: Wednesday resumes by computing, not by re-seeding.** It sees Tuesday's state
+  is missing, recomputes Tuesday from Tuesday's data, then runs Wednesday. Replay works
+  *between* seeds; it cannot replace one. Re-seed only if Tuesday's input data is genuinely
+  lost, and even then replay from the last good checkpoint.
+
+  **The deciding detail: key state by date, and check that the state loaded is from the
+  previous trading day.** If Wednesday simply loads the "latest" state, it uses Monday's state
+  as if it were Tuesday's. That silently corrupts every day after it, because a wrong ban flag
+  never decays. With the date check and the catch-up, one bad night only loses a day.
+
+  The word *trading* is doing real work there. `progress.md` has the holiday table: 8 Nov 2026
+  is a Sunday **with** Muhurat trading, and 10 Nov is a holiday. A naive previous-calendar-day
+  check would reject the valid Sunday file and silently accept the gap across the holiday,
+  which are the two opposite failures in one rule.
+
+  **Falls out of this, and is question 4:** if no trustworthy seed can be established, the
+  honest thing is to refuse rather than guess.
+
+- **4. When state is unavailable:**
+
+  **Refuse, scoped narrowly: refuse to emit a verdict for that one scrip, and complete the
+  run for the other 217.** Per-scrip refusal, never per-run. The report carries 217 verdicts
+  and one explicit `UNKNOWN - ban state unavailable` row with the reason attached, worded so
+  it cannot be read as "compliant". The refusal is logged loudly enough that someone fixes
+  the feed.
+
+  My first draft of this answer scoped the refusal to blocking new or position-increasing
+  orders. That is a pre-trade risk control, and this engine is not one - it runs every evening
+  on published files and never sees an order. `docs/research_report.md` makes the point in the
+  other direction: OMS and RMS vendors sit in the pre-trade order path, and the gap this
+  project fills is that nobody replays these calculations afterwards. The structure of the
+  answer survived the remap unchanged; only the mechanism moved.
+
+  **Why "assume not-banned" is the dangerous one.** It fails open. If the scrip really is in
+  the ban period, the engine reports a clean book while the desk is accruing a penalty under
+  para 5.3.2, and the error stays silent until the exchange raises it. That is the error
+  direction that costs money, and it is also the one direction a monitoring system must never
+  take by default.
+
+  **Why "assume last-known" sounds safer and is not.** Ban status changes on exactly the days
+  that matter. A scrip enters when FutEq OI crosses 95% of MWPL and exits when it comes down
+  to 80% or below, so yesterday's status is wrong *precisely on the transition day* - which
+  is the day the penalty lands and the only day the system has any reason to exist. Carrying
+  state forward is harmless on the 99% of days when nothing changes, and the days it is wrong
+  are not randomly distributed: they are concentrated entirely on the transitions. An
+  estimator that is accurate except when it matters is worth nothing.
+
+  **Why refusing costs less than it sounds.** Reducing a position is permitted during a ban,
+  so the safe advice under *unknown* state is identical to the safe advice under *known
+  banned*: reduce only. The engine can therefore say something useful about that scrip
+  without knowing its state, which is why refusing one row out of 218 is cheap. The run still
+  completes, the other 217 verdicts are unaffected, and the operator at 18:40 gets a full
+  report with one flagged row rather than no report at all.
+
+  **Does the `penalty_rate` discipline apply?** Yes - `Rules.get()` raises
+  `UnverifiedRuleError` rather than returning a plausible number, and this is the same call.
+  But the analogy carries less weight than I first gave it: there is no last-known penalty
+  rate to fall back on, because SEBI never published one and delegated the rate to the
+  exchange. That is an *absent* value, not a stale one. So `penalty_rate` tests only the cost
+  axis of the rule below. Ban state tests both axes.
+
+  **The rule that decides it, kept for reuse:** how fast does the missing value change, and
+  what does being wrong in the unsafe direction cost? Slow-changing with a modest cost means
+  last-known is acceptable. Fast-changing with an exchange-penalty cost means refuse. Ban
+  state is a daily flag whose entire purpose is to change, with a penalty attached - so it
+  refuses.
+
+- **Decision:** `is_in_ban(futeq_oi, mwpl, was_in_ban_yesterday) -> bool` is a state
+  transition, not a predicate, so the engine carries ban state between days. State is stored
+  per trading date, keyed on ISIN with the symbol held alongside as a check, and index rows
+  are rejected because they have no ISIN and no MWPL. Day one is seeded from `fo_secban`
+  together with a `combineoi` close enough in date to resolve its symbols to ISINs; no
+  warm-up or replay can substitute for that seed, because a wrongly seeded ban flag never
+  decays. Each run loads the state for the previous **trading** day, recomputing any missing
+  intermediate day from its own files before proceeding, and re-seeding only when input data
+  is genuinely lost. Where state for a scrip cannot be established, the engine refuses to
+  emit a verdict for that scrip alone, marks the row `UNKNOWN` with its reason, logs loudly,
+  and completes the run for every other scrip.
+
+- **Why:** two numbers cannot answer the question. On 30 Oct SAIL was banned at 84.93%
+  utilisation while BANDHANBNK traded freely at 85.98%, so the function needs the prior state
+  to know which of the two thresholds applies. Everything else above follows from that one
+  fact: if state is carried, it has to be keyed on something stable, seeded from an
+  observation, matched to the right previous day, and refused rather than guessed when
+  missing.
+- **Evidence:** 30 Oct 2026, `data/extracted/combineoi_30102026/combineoi_30102026.csv`,
+  218 securities. SAIL flagged `No Fresh Positions` at 84.93% FutEq utilisation; BANDHANBNK
+  trading freely at 85.98%. Neither anywhere near 95%. Of 218 rows, 7 sit in the ambiguous
+  80-95% band, 2 of them banned and 5 free. No row at all exceeds 95%, so the entry rule has
+  **zero test cases** in this file - a test asserting it would have passed vacuously.
+  Separately, a wrongly seeded flag run against the same utilisation path as a correctly
+  seeded one disagreed on 19 of 20 days, and agreed on the twentieth only because utilisation
+  fell below the 80% exit and overwrote both.
+- **Alternatives rejected:** the two insufficient signatures (recorded under Q1); keying on
+  symbol (Q2); a warm-up replay in place of a seed (Q3); failing open or carrying last-known
+  state (Q4). Also rejected: refusing the whole run when one scrip's state is missing, which
+  would turn one bad row into no report.
+- **Outcome:** accepted, 4 Nov 2026. Nothing implemented yet. `SPEC.md` rows 4 and 5 need
+  their `is_in_ban()` signature updated to three arguments, and `PLAN.md` W2 needs the state
+  store added to the runner's design.
+
+- **Repayment, owed next session.** All four answers above were reached in conversation with
+  Claude rather than written cold, and Claude wrote the Decision paragraph as a synthesis of
+  them. Before anything else next session, re-derive Q1 to Q4 into a blank file from memory
+  and diff against this entry.
+  - Q1: reproduce the signature, and say why two arguments cannot work.
+  - Q2: answer "why not just use the ticker?" in two sentences without looking.
+  - Q3: state the test that distinguishes a latching state from a decaying one, and say which
+    of my two projects each one is.
+  - Q4: state the rule that decides between refusing and falling back to last-known, and say
+    why ban status fails it.
+  - Then write the Decision paragraph again myself, from the four answers, without reading
+    Claude's version first.

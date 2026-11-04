@@ -51,7 +51,7 @@ three entries in `docs/doubts.md`, the `notes_faq.md` second passes, and the tea
 - [x] Copy the final numbers into `docs/handcalcs/mwpl_by_hand.md` as the engine's first test case
 
 ### D3 — Sat 31 Oct
-- [ ] Read SEBI 2025/122 (intraday limits for index derivatives)
+- [x] Read SEBI 2025/122 (intraday limits for index derivatives). Read it myself, 2 Nov
 - [ ] Read NSE SURV70553 (snapshot monitoring, SOP report layout)
 - [ ] Work out one book's FutEq exposure by hand
 - [ ] Work out a ban entry by hand
@@ -130,8 +130,10 @@ Excel on this laptop wants activation.
 Hand-calculations now live in the repo as `.xlsx` **and** `.csv`. Git can diff a CSV and pytest can
 read one; neither is true of a spreadsheet. The `.md` companion holds the reasoning.
 
-**Knowingly deferred:** D3's reading of 2025/122 and SURV70553. Claude has read and indexed both,
-but I have not read them myself, and that debt is mine to clear before week 3.
+**Knowingly deferred:** NSE SURV70553. I read SEBI 2025/122 myself on 2 Nov; SURV70553 Claude has
+read and indexed but I have not, and that debt is mine to clear before week 3. It is the source
+for the 15-minute cure period, the snapshot schedule and the whole delta convention in Annexure 2,
+so it sits behind four rows of `SPEC.md` and the entire `mechanics` block of `config/rules.yaml`.
 
 ### D5 — Tue 3 Nov
 - [ ] Check which NSE files download without a login: bhavcopy, OI/MWPL, ban list, contract delta
@@ -175,11 +177,20 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
   per-contract delta file and a published FutEq OI file exist, so A and B are no longer
   alternatives - B becomes a validation layer over A, with two independent scoring keys at
   different levels of aggregation
-- [ ] **Log the ban-state design decision in `DECISIONS.md`.** This one is mine, because it is
-  core logic. On 30 Oct SAIL was banned at 84.93% FutEq utilisation while BANDHANBNK traded
-  freely at 85.98%. So `is_in_ban()` cannot be a pure function of today's utilisation; it needs
-  yesterday's ban state as an input. Write down what that means for the engine, including how
-  day one of the pipeline gets its initial state
+- [x] **Log the ban-state design decision in `DECISIONS.md`.** Done 4 Nov as #011, four
+  questions answered: the signature, what state is keyed on, how day one seeds and recovers
+  from a gap, and what the engine does when state is unavailable. The reasoning is mine;
+  Claude transcribed it and corrected two answers that were sound but aimed at the wrong
+  system - a warm-up replay from my VaR engine, and an order-blocking scope from an RMS.
+  That pattern is the day's real lesson and is owed to `LEARNING.md`
+- [ ] **Repayment for #011:** re-derive all four answers from memory into a blank file and
+  diff against the entry, then rewrite the Decision paragraph myself without reading Claude's.
+  Four specific tests are listed at the bottom of #011. First job next session
+- [ ] **Update `SPEC.md` rows 4 and 5:** `is_in_ban()` now takes three arguments, not two.
+  The rows still describe a two-argument function
+- [ ] **Update `PLAN.md` W2:** the runner needs a dated, ISIN-keyed ban-state store, and the
+  synthetic prop book needs trades, not just end-of-day holdings (the row 6 finding). Both are
+  the same point: a breach needs a reason, not a boolean
 - [ ] **Confirm the hysteresis explanation with data, not reasoning.** Download
   `combineoi_<date>.zip` for 29 Oct and the days before, and find the day SAIL's FutEq
   utilisation exceeded 95%. Until then the mechanism is inferred from the clause, not observed
