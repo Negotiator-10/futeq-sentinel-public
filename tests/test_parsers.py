@@ -14,7 +14,12 @@ import datetime as dt
 
 import pytest
 
-from sentinel.parsers import BanList, parse_ban_list
+from sentinel.parsers import (
+    BanList,
+    as_dataframe,
+    parse_ban_list,
+    parse_mwpl_file,
+)
 
 REAL = "tests/fixtures/fo_secban_02112026.csv"
 EMPTY_DAY = "tests/fixtures/fo_secban_empty.csv"
@@ -178,3 +183,174 @@ def test_a_truncated_file_is_indistinguishable_from_a_no_ban_day(tmp_path):
     assert parse_ban_list(truncated).symbols == frozenset()
     # Identical to the real no-ban day, which is the problem:
     assert parse_ban_list(EMPTY_DAY).symbols == frozenset()
+
+
+# ===========================================================================
+# parse_mwpl_file() and as_dataframe()
+# ===========================================================================
+
+SAMPLE = "tests/fixtures/combineoi_sample.csv"
+
+MWPL_HEADER = (
+    "Date, ISIN, Scrip Name, NSE Symbol, MWPL, Open Interest, "
+    "Future Equivalent Open Interest, Limit for Next Day"
+)
+BARRED_ROW = (
+    "30-OCT-2026,INE918Z01012,KAYNES TECHNOLOGY IND LTD,KAYNES,"
+    "REDACTED,REDACTED,REDACTED,No Fresh Positions"
+)
+NORMAL_ROW = (
+    "30-OCT-2026,INE466L01038,360 ONE WAM LIMITED,360ONE,"
+    "REDACTED,REDACTED,REDACTED,REDACTED"
+)
+
+
+def write_mwpl(tmp_path, *rows: str, header: str = MWPL_HEADER):
+    path = tmp_path / "combineoi_test.csv"
+    path.write_text("\n".join((header, *rows)) + "\n", encoding="utf-8")
+    return path
+
+
+def test_the_sample_file():
+    rows = parse_mwpl_file(SAMPLE)
+    assert len(rows) == 3
+    assert {r.symbol for r in rows} == {"KAYNES", "SAIL", "360ONE"}
+    assert all(r.trade_date == dt.date(2026, 10, 30) for r in rows)
+
+
+def test_a_barred_row_has_no_headroom():
+    """The decision-1 invariant, on real published data."""
+    kaynes = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "KAYNES")
+    assert kaynes.no_fresh_positions is True
+    assert kaynes.headroom_shares is None
+    # And the formula would still have produced a POSITIVE number for it, which is why the
+    # field is None rather than that number.
+    assert 0.95 * kaynes.mwpl - kaynes.futeq_oi > 0
+
+
+def test_a_normal_row_carries_nses_own_headroom():
+    row = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "360ONE")
+    assert row.no_fresh_positions is False
+    assert row.headroom_shares == REDACTED
+    # NSE truncates to whole shares, so its figure is just under the exact formula.
+    exact = 0.95 * row.mwpl - row.futeq_oi
+    assert 0 <= exact - row.headroom_shares < 1
+
+
+def test_futeq_oi_is_fractional_and_mwpl_is_not():
+    """FutEq OI is a sum of delta-weighted positions, so it cannot be an integer type."""
+    row = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "KAYNES")
+    assert isinstance(row.mwpl, int)
+    assert isinstance(row.notional_oi, int)
+    assert isinstance(row.futeq_oi, float)
+    assert row.futeq_oi % 1 != 0
+
+
+def test_a_zip_and_its_csv_give_the_same_rows(tmp_path):
+    """NSE ships a zip holding the CSV and a malformed XML copy of the same records.
+
+    The XML's element name is `<Future Equivalent Open Interest>`, with spaces, so no
+    conforming parser can read it. The member must be chosen by name, not by position.
+    """
+    import zipfile
+
+    archive = tmp_path / "combineoi_sample.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr(
+            "combineoi_sample.xml",
+            "<MWPL_Viols><MWPL><Future Equivalent Open Interest>1"
+            "</Future Equivalent Open Interest></MWPL></MWPL_Viols>",
+        )
+        z.write(SAMPLE, "combineoi_sample.csv")
+
+    assert parse_mwpl_file(archive) == parse_mwpl_file(SAMPLE)
+
+
+def test_a_renamed_column_is_refused(tmp_path):
+    """The 7 Dec 2026 format cutover is a known date for exactly this."""
+    header = MWPL_HEADER.replace("Future Equivalent Open Interest", "FutEq OI")
+    path = write_mwpl(tmp_path, NORMAL_ROW, header=header)
+    with pytest.raises(ValueError, match="missing column"):
+        parse_mwpl_file(path)
+
+
+def test_two_trade_dates_in_one_file_are_refused(tmp_path):
+    path = write_mwpl(tmp_path, NORMAL_ROW, BARRED_ROW.replace("30-OCT-2026", "29-OCT-2026"))
+    with pytest.raises(ValueError, match="different trade dates"):
+        parse_mwpl_file(path)
+
+
+def test_a_repeated_isin_is_refused(tmp_path):
+    path = write_mwpl(tmp_path, NORMAL_ROW, NORMAL_ROW)
+    with pytest.raises(ValueError, match="more than once"):
+        parse_mwpl_file(path)
+
+
+def test_an_unreadable_limit_value_is_refused(tmp_path):
+    """Neither a whole number of shares nor the sentence NSE uses."""
+    path = write_mwpl(tmp_path, NORMAL_ROW.replace("REDACTED", "Under Review"))
+    with pytest.raises(ValueError, match="neither a whole number"):
+        parse_mwpl_file(path)
+
+
+def test_an_index_row_is_refused(tmp_path):
+    """DECISIONS.md #011: state is keyed on ISIN, and indices have none.
+
+    MWPL does not apply to them - they are governed by SPEC.md row 13's index position
+    limits - so they are absent from this file. A row with `ISIN = NA` means something
+    changed, and a store that accepts rows it cannot key will return the wrong one.
+    """
+    path = write_mwpl(tmp_path, "30-10-2026,NA,NA,BANKNIFTY,REDACTED,REDACTED,5977425.37,1")
+    with pytest.raises(ValueError, match="no ISIN"):
+        parse_mwpl_file(path)
+
+
+def test_both_nse_date_formats_are_accepted(tmp_path):
+    """`combineoi` writes 30-OCT-2026 and `combineoi_deleq` writes 30-10-2026."""
+    path = write_mwpl(tmp_path, NORMAL_ROW.replace("30-OCT-2026", "30-10-2026"))
+    assert parse_mwpl_file(path)[0].trade_date == dt.date(2026, 10, 30)
+
+
+def test_a_file_with_no_data_rows_is_refused(tmp_path):
+    path = write_mwpl(tmp_path)
+    with pytest.raises(ValueError, match="no data rows"):
+        parse_mwpl_file(path)
+
+
+def test_the_result_is_a_tuple_of_frozen_rows():
+    rows = parse_mwpl_file(SAMPLE)
+    assert isinstance(rows, tuple)
+    with pytest.raises(AttributeError):
+        rows[0].mwpl = 1  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# The DataFrame boundary, and what it gives up
+# ---------------------------------------------------------------------------
+
+
+def test_as_dataframe_turns_none_into_nan_and_that_is_the_risk():
+    """Documents that the decision-1 protection does NOT survive the conversion.
+
+    `headroom_shares` is `int | None`. pandas has no integer column that holds `None`, so
+    the column becomes float64 and every None becomes NaN - and pandas skips NaN silently.
+    A sum or mean over the column therefore covers only the unbarred rows while looking
+    like it covers all of them. In pure Python the same sum raises.
+
+    This test asserts the current behaviour so that it fails loudly if the representation
+    ever changes, and so the risk is written down somewhere executable.
+    """
+    rows = parse_mwpl_file(SAMPLE)
+    df = as_dataframe(rows)
+
+    assert len(df) == 3
+    assert df["headroom_shares"].dtype == "float64"
+    assert df["headroom_shares"].isna().sum() == 2
+
+    # pandas quietly aggregates over 1 row, not 3:
+    assert df["headroom_shares"].count() == 1
+    assert df["headroom_shares"].sum() == REDACTED
+
+    # Pure Python refuses the same thing, which is why None was chosen:
+    with pytest.raises(TypeError):
+        sum(r.headroom_shares for r in rows)  # type: ignore[misc]

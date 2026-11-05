@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from dataclasses import dataclass
+import zipfile
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Sequence
 
-__all__ = ["BanList", "parse_ban_list"]
+import pandas as pd
+
+__all__ = ["BanList", "MwplRow", "as_dataframe", "parse_ban_list", "parse_mwpl_file"]
 
 #: The ban list's first line is prose, not a header row. Checked case-insensitively as a
 #: substring, so punctuation and capitalisation can drift without breaking the parser, but a
@@ -40,6 +44,85 @@ class BanList:
     trade_date: dt.date
     symbols: frozenset[str]
 
+
+@dataclass(frozen=True)
+class MwplRow:
+    """One security's row from NSE's `combineoi` file, exactly as published.
+
+    Nothing here is computed. Utilisation is `futeq_oi / mwpl` and the engine works that out
+    for itself; see `parse_mwpl_file()` on why the division does not belong in a parser.
+
+    `mwpl` and `notional_oi` are share counts and whole. `futeq_oi` is **not** - it is a sum
+    of delta-weighted positions and deltas are `N(d1)`, so it arrives fractional
+    (REDACTED). Annotating it `int` would be a lie that a type checker believes.
+    """
+
+    trade_date: dt.date
+    isin: str
+    scrip_name: str
+    symbol: str
+    mwpl: int
+    notional_oi: int
+    futeq_oi: float
+
+    #: True when NSE printed `No Fresh Positions` instead of a headroom figure.
+    no_fresh_positions: bool
+
+    #: NSE's own `0.95 * MWPL - FutEq OI`, truncated by NSE to whole shares, or None when the
+    #: scrip is barred. Always None exactly when `no_fresh_positions` is True - the two fields
+    #: are not independent, and `__post_init__` refuses any record where they disagree.
+    #:
+    #: It is None rather than a number for banned rows because the formula still yields a
+    #: POSITIVE figure for them - SAIL was 21,841,939 shares under the 95% line on 30 Oct and
+    #: still barred - so a number here would read as permission. NSE suppresses it for that
+    #: reason and so does this record. Code that cannot add None cannot sum it by accident.
+    headroom_shares: int | None
+
+    def __post_init__(self) -> None:
+        if self.no_fresh_positions != (self.headroom_shares is None):
+            raise ValueError(
+                f"{self.symbol} ({self.isin}) on {self.trade_date}: "
+                f"no_fresh_positions={self.no_fresh_positions} but "
+                f"headroom_shares={self.headroom_shares!r}. "
+                f"Headroom must be None exactly when fresh positions are barred."
+            )
+        # Zero is legitimate and must stay allowed: ban entry is "exceeds 95%", so a scrip
+        # sitting at exactly 95% is not barred and its headroom is exactly 0. `<= 0` would
+        # read more naturally here and would be wrong.
+        #
+        # Negative is not legitimate, and this is a claim from the circular rather than an
+        # observation: a scrip above 95% of MWPL enters the ban period, so NSE prints the
+        # sentence for it, not a number. Any row carrying a number is therefore under 95% and
+        # its headroom is non-negative by construction. Checked against all 216 printed
+        # numbers on 30 Oct 2026: minimum 372,386, highest utilisation 85.98%. If this ever
+        # fires, either NSE has a bug or my reading of the ban rule is wrong, and both are
+        # things I need to be told rather than silently ingest.
+        if self.headroom_shares is not None and self.headroom_shares < 0:
+            raise ValueError(
+                f"{self.symbol} ({self.isin}) on {self.trade_date}: "
+                f"negative headroom {self.headroom_shares}. A scrip over 95% of MWPL should "
+                f"carry 'No Fresh Positions', not a number."
+            )
+        # Bounds on the READING, not a computation. Checked against all 218 rows on
+        # 30 Oct 2026: MWPL minimum 736,885 and FutEq OI minimum 91,328.72, so neither guard
+        # comes near good data. Guarding mwpl here also means the engine's own
+        # futeq_oi / mwpl can never divide by zero.
+        if self.mwpl <= 0:
+            raise ValueError(
+                f"{self.symbol} ({self.isin}) on {self.trade_date}: MWPL is {self.mwpl}. "
+                f"A scrip in F&O has a positive market-wide position limit."
+            )
+        if self.futeq_oi < 0:
+            raise ValueError(
+                f"{self.symbol} ({self.isin}) on {self.trade_date}: FutEq OI is "
+                f"{self.futeq_oi}. It is gross-added across UCCs, so it cannot be negative."
+            )
+        if not self.isin or self.isin.strip().upper() in {"NA", "NAN", "-"}:
+            raise ValueError(
+                f"{self.symbol} on {self.trade_date}: no ISIN. MWPL does not apply to "
+                f"indices and DECISIONS.md #011 keys state on ISIN, so an index row is "
+                f"refused rather than stored under a null key."
+            )
 
 def parse_ban_list(path: str | Path) -> BanList:
     """Read NSE's `fo_secban_<ddmmyyyy>.csv` and return the date and the banned symbols.
@@ -140,50 +223,167 @@ def parse_ban_list(path: str | Path) -> BanList:
     return BanList(trade_date=trade_date, symbols=frozenset(symbols))
 
 
-# ===========================================================================
-# YOURS TO WRITE NEXT: parse_mwpl_file()
-#
-# THE FILE. tests/fixtures/combineoi_sample.csv - four lines cut from the real 218-row file:
-#
-#   Date, ISIN, Scrip Name, NSE Symbol, MWPL, Open Interest, Future Equivalent Open Interest, Limit for Next Day
-#   30-OCT-2026,INE918Z01012,KAYNES TECHNOLOGY IND LTD,KAYNES,REDACTED,REDACTED,REDACTED,No Fresh Positions
-#   30-OCT-2026,INE114A01011,STEEL AUTHORITY OF INDIA,SAIL,REDACTED,REDACTED,REDACTED,No Fresh Positions
-#   30-OCT-2026,INE466L01038,360 ONE WAM LIMITED,360ONE,REDACTED,REDACTED,REDACTED,REDACTED
-#
-# Unlike the ban list this is a proper CSV with a real header, so pandas.read_csv handles the
-# shape. The work is in three decisions, not in the reading.
-#
-# DECISION 1, and it is the interesting one. LOOK AT THE LAST COLUMN.
-#   Two of those rows say `No Fresh Positions`. One says `REDACTED`.
-#   NSE has packed TWO different facts into one column: how much headroom is left, AND
-#   whether the scrip is banned. A column that is sometimes a number and sometimes a
-#   sentence cannot be used in arithmetic, and `float("No Fresh Positions")` raises.
-#   So decide how your record represents those two facts. How many fields, and of what
-#   types? You proved on 2 Nov that the number equals 0.95 * MWPL - FutEq OI on 216 of 216
-#   rows, so you know exactly what it means when it is a number.
-#
-# DECISION 2. Does this parser compute utilisation?
-#   You have MWPL and FutEq OI in every row, so you COULD divide them here.
-#   Think about the distinction you got right with the ban list: this function reads what
-#   NSE published. Utilisation is something the engine works out. Decide where the division
-#   belongs and say why in the docstring - it is the same reading-versus-computing line.
-#
-# DECISION 3. What comes back - a list of frozen dataclasses, like BanList, or a pandas
-#   DataFrame?
-#   For 218 rows either works. The caller is the reconciliation step, which subtracts your
-#   number from NSE's across all 218 rows at once and reports an error distribution.
-#   Dataclasses are consistent with BanList and type-checked; a DataFrame makes that
-#   arithmetic one line. Pick one and say what you are trading away.
-#
-# ALSO TRUE, AND WORTH HANDLING:
-#   - The header has a space after each comma: ' ISIN', not 'ISIN'. Column names will carry
-#     it unless you strip them. pandas has `skipinitialspace=True`.
-#   - The date is 30-OCT-2026 here and 30-10-2026 in combineoi_deleq. Same exchange, same
-#     day, two formats.
-#   - This file is single stocks only - 218 of them. The nine indices are absent, because
-#     MWPL does not apply to them. DECISIONS.md #011 says a row with no ISIN is refused.
-#   - The real file lives inside combineoi_30102026.zip alongside a malformed XML copy.
-#     Decide whether this function takes the .zip or the extracted .csv.
-#
-# THEN the tests in tests/test_parsers.py, alongside the ban-list ones.
-# ===========================================================================
+#: Exactly the eight columns NSE publishes in `combineoi`, in order, after stripping the space
+#: that follows each comma in the header. Checked rather than assumed: a renamed or reordered
+#: column means the format changed, and the 7 Dec 2026 cutover is a known date for that.
+_MWPL_COLUMNS = (
+    "Date",
+    "ISIN",
+    "Scrip Name",
+    "NSE Symbol",
+    "MWPL",
+    "Open Interest",
+    "Future Equivalent Open Interest",
+    "Limit for Next Day",
+)
+
+#: What NSE prints in `Limit for Next Day` instead of a figure when a scrip is barred.
+_NO_FRESH_POSITIONS = "No Fresh Positions"
+
+#: The CSV inside `combineoi_<ddmmyyyy>.zip`. The archive also holds an XML copy of the same
+#: records which is NOT well-formed - its element name is `<Future Equivalent Open Interest>`,
+#: with spaces - so no conforming parser can read it. The CSV is the only usable member.
+_MWPL_CSV_IN_ZIP = "combineoi_{stem}.csv"
+
+
+def parse_mwpl_file(path: str | Path) -> tuple[MwplRow, ...]:
+    """Read NSE's `combineoi` file and return one validated `MwplRow` per security.
+
+    Accepts either the `.zip` NSE publishes or the `.csv` extracted from it. The archive's
+    other member is a malformed XML copy, so the CSV is selected by name rather than by
+    position.
+
+    This is the file SEBI Master Circular cl 3.3.2.1.3 requires NSE to disseminate: ISIN,
+    name, symbol, MWPL in shares and OI in shares, per security, by 6:30 PM. It covers single
+    stocks only - 218 of them on 30 Oct 2026 - because MWPL does not apply to indices, which
+    are governed by the index position limits of `SPEC.md` row 13 instead. An index row would
+    arrive with `ISIN = NA` and `MwplRow` refuses it.
+
+    **Nothing is computed here.** Utilisation is `futeq_oi / mwpl` and the engine works it out,
+    for the three reasons recorded against decision 2 in this module. The headroom figure in
+    each row is NSE's own, truncated by NSE to whole shares, not a recomputation.
+
+    **Returns a tuple, not a DataFrame.** Every row has passed `MwplRow.__post_init__`, so a
+    contradictory record cannot exist in the result. Convert to a DataFrame with
+    `as_dataframe()` at the point of analysis, and read that function's warning first.
+
+    Raises:
+        ValueError: the file is missing its expected columns, carries more than one trade
+            date, repeats a security, or contains a row `MwplRow` refuses.
+    """
+    path = Path(path)
+
+    if path.suffix.lower() == ".zip":
+        with zipfile.ZipFile(path) as archive:
+            wanted = _MWPL_CSV_IN_ZIP.format(stem=path.stem.replace("combineoi_", ""))
+            members = [n for n in archive.namelist() if n.lower() == wanted.lower()]
+            if not members:
+                raise ValueError(
+                    f"{path}: no member named {wanted!r}. Found {archive.namelist()}. The XML "
+                    f"member is malformed and cannot be used as a fallback."
+                )
+            with archive.open(members[0]) as handle:
+                frame = pd.read_csv(handle, skipinitialspace=True, keep_default_na=False)
+    else:
+        frame = pd.read_csv(path, skipinitialspace=True, keep_default_na=False)
+
+    # `skipinitialspace` handles the values; the header needs stripping separately, because
+    # NSE writes 'Date, ISIN, Scrip Name, ...' with a space after each comma.
+    #
+    # `keep_default_na=False` is load-bearing, not tidiness. pandas' default missing-value
+    # list includes the literal string "NA", which is exactly what NSE writes in the ISIN
+    # column for an index row. Without this, that "NA" silently became NaN, str() made it
+    # "nan", and the index-row guard in MwplRow never fired. A test caught it.
+    frame.columns = [str(c).strip() for c in frame.columns]
+
+    missing = [c for c in _MWPL_COLUMNS if c not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"{path}: missing column(s) {missing}. Got {list(frame.columns)}. A renamed column "
+            f"means the format changed - see the 7 Dec 2026 cutover in docs/READING.md."
+        )
+
+    rows: list[MwplRow] = []
+    for position, record in enumerate(frame.to_dict("records"), start=2):
+        printed = str(record["Limit for Next Day"]).strip()
+        barred = printed == _NO_FRESH_POSITIONS
+
+        if barred:
+            headroom: int | None = None
+        else:
+            try:
+                headroom = int(printed)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{path} line {position}: 'Limit for Next Day' is {printed!r}, which is "
+                    f"neither a whole number of shares nor {_NO_FRESH_POSITIONS!r}"
+                ) from exc
+
+        rows.append(
+            MwplRow(
+                trade_date=_parse_mwpl_date(record["Date"], path, position),
+                isin=str(record["ISIN"]).strip(),
+                scrip_name=str(record["Scrip Name"]).strip(),
+                symbol=str(record["NSE Symbol"]).strip(),
+                mwpl=int(record["MWPL"]),
+                notional_oi=int(record["Open Interest"]),
+                futeq_oi=float(record["Future Equivalent Open Interest"]),
+                no_fresh_positions=barred,
+                headroom_shares=headroom,
+            )
+        )
+
+    if not rows:
+        raise ValueError(f"{path}: no data rows. A trading day has securities in this file.")
+
+    dates = {r.trade_date for r in rows}
+    if len(dates) != 1:
+        raise ValueError(
+            f"{path}: rows carry {len(dates)} different trade dates ({sorted(dates)}). This "
+            f"file describes one day."
+        )
+
+    isins = [r.isin for r in rows]
+    if len(isins) != len(set(isins)):
+        duplicated = sorted({i for i in isins if isins.count(i) > 1})
+        raise ValueError(f"{path}: the same ISIN appears more than once: {duplicated}")
+
+    return tuple(rows)
+
+
+def _parse_mwpl_date(value: object, path: Path, line: int) -> dt.date:
+    """`combineoi` writes 30-OCT-2026; `combineoi_deleq` writes 30-10-2026, same exchange and
+    same day. Both are accepted so the two files can be compared without the caller caring.
+    """
+    text = str(value).strip()
+    for fmt in ("%d-%b-%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return dt.datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"{path} line {line}: cannot read {text!r} as a date")
+
+
+def as_dataframe(rows: Sequence[MwplRow]) -> "pd.DataFrame":
+    """A read-only DataFrame view of parsed rows, for analysis only.
+
+    **Read this before using the result.** The conversion silently weakens the guarantee that
+    `MwplRow` exists to provide. `headroom_shares` is `int | None`; pandas has no integer
+    column that holds `None`, so the column becomes `float64` and every `None` becomes `NaN`.
+    And pandas skips `NaN` by default:
+
+        len(df)                     218
+        df.headroom_shares.sum()    the total over 216 rows, no warning
+        df.headroom_shares.count()  216, not 218
+        df.headroom_shares.mean()   the mean over 216, presented as the mean
+
+    In pure Python the same sum raises `TypeError: unsupported operand type(s) for +: 'int'
+    and 'NoneType'`, which is the whole reason `None` was chosen over a number for barred
+    scrips - a positive headroom reads as permission, and SAIL was 21,841,939 shares under
+    the 95% line on 30 Oct while barred. That protection does not survive this function.
+
+    So: treat the result as a read-only view. Never feed it back into the engine. If data has
+    to re-enter, it goes through `MwplRow` again, where the invariants are enforced. When
+    aggregating `headroom_shares`, say in the output how many rows the figure covers.
+    """
+    return pd.DataFrame([asdict(row) for row in rows])
