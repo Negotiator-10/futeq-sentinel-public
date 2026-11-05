@@ -201,3 +201,15 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
   utilisation exceeded 95%. Until then the mechanism is inferred from the clause, not observed
 - [ ] Parser note for D6: `fo_secban` has a prose first line, not a header row, and the XML
   inside `combineoi.zip` is not well-formed (spaces in an element name). Use the CSV
+- [ ] **Downloader must record enough to detect a truncated file.** Found 5 Nov while testing
+  `parse_ban_list()` against deliberately bad inputs. A download that received `fo_secban`'s
+  heading and then died is byte-for-byte identical to a legitimate no-ban day: both are one
+  valid line. The file carries no row count, length or checksum, so no parser can tell them
+  apart. The engine would read a failed download as "nothing is banned today", which is the
+  expensive error direction per `DECISIONS.md` #011 Q4. The downloader has to record the HTTP
+  content length or a checksum and hand it to the parser. Feeds the Week 2 D1 acquisition
+  decision (#010)
+- [ ] Third time a rule has needed data from outside its own input: row 6 needed fills, row 5
+  needed yesterday's state, and now the ban list needs its own transport metadata. Worth one
+  `LEARNING.md` line - when two valid readings are indistinguishable, the deciding fact is
+  somewhere you are not looking

@@ -1,0 +1,49 @@
+name: tests
+
+# Automation 9a. Runs the test suite on every push and every pull request.
+#
+# The point is not that the tests pass here - they already pass on Chintamani's laptop. It is
+# that they pass on a machine with nothing on it. This runner has no conda env `sentinel`, no
+# `data/` directory (it is gitignored, so GitHub has never seen it), and a different operating
+# system. Anything the suite secretly depends on fails here and nowhere else.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Confirm no raw NSE data reached the repository
+        # CLAUDE.md: raw NSE files stay in data/ and never enter git; secrets live only in
+        # .env. A tracked PDF, zip or .env is a policy failure, so it fails the build rather
+        # than waiting to be noticed in a review.
+        run: |
+          if git ls-files | grep -Ei '^data/|(^|/)\.env$|\.pdf$|\.zip$'; then
+            echo "::error::raw data, an archive or a .env file is tracked in git"
+            exit 1
+          fi
+          echo "clean: nothing tracked under data/, no .env, no PDFs, no archives"
+
+      - name: Tests
+        # -W error::UserWarning matches pyproject's filterwarnings, so a threshold that rests
+        # on an assumption rather than a citation fails the build until someone acknowledges it.
+        run: python -m pytest -q
