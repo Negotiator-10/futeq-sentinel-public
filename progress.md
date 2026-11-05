@@ -115,3 +115,35 @@ penalty rate is a guess it must refuse to make. 34 tests pass. Decisions #007 to
 
 ## Superseded: next task as at 31 Oct morning
 Read paragraph 5.2 of SEBI circular 2025/79 (link in `docs/READING.md`) and fix the Q2 row of `docs/notes_faq.md`: both quantities that set MWPL, the floor, and the reset frequency. Then work out one stock's MWPL and utilisation by hand in Excel. That is D2's work, and it closes the biggest gap in the notes at the same time.
+
+## Thu 5 Nov: Week 2 Day 1, and what Week 1 actually delivered
+Week 1 closed on Wed 4 Nov. The build finished ahead of the plan; the understanding finished
+behind it, and the gap is recorded rather than smoothed over.
+
+Shipped since 2 Nov: `config/rules.yaml` with fifty thresholds, each carrying its own source and
+the date I read it; a loader that refuses any threshold without provenance and refuses to
+evaluate the three the circulars leave to the exchange; `DECISIONS.md` #007 to #011; two parsers
+with 65 tests; and CI that fails the build if raw NSE data, a `.env`, a PDF or an archive is ever
+tracked in git. The last one caught me an hour after I wrote it.
+
+Two findings from the data are worth more than any of the code. NSE's `combineoi` file publishes
+`Limit for Next Day`, and it equals `0.95 x MWPL - FutEq OI` on 216 of 216 rows - the formula I
+derived by hand from para 5.2.3 and 5.2.6 four days before I had the file. It reconciles against
+notional OI on 0 of 216, which settles that NSE computes on the futures-equivalent basis. And on
+30 Oct SAIL was barred at 84.93% utilisation while BANDHANBNK traded freely at 85.98%, which
+proves ban status is a state rather than a measurement and forced the three-argument
+`is_in_ban()` in #011.
+
+Twice in one afternoon I produced a well-argued answer aimed at the wrong system: a GARCH warm-up
+from my VaR project, and an order-blocking scope from an OMS. A good design for the wrong system
+reads exactly like a good design. That is the week's real lesson and it is lesson 5 in
+`LEARNING.md`.
+
+The honest ledger: 48 open against 36 done, and most of the 48 is Week 1 understanding debt, not
+build work. Three pieces of core logic were written by Claude at my request - `SPEC.md` rows 6 to
+16, the `rules.yaml` rewrite, and #011 Q2 - plus the first `LEARNING.md` entry. Repayment blocks
+in `#011` and `TASKS.md` exist to work that off, and #011's was done from memory on 5 Nov.
+
+Next: the reconciliation. Compute utilisation and headroom from the parsed rows and score them
+against NSE's own published column. It is the first end-to-end result, the spine of v0.1 on
+Wed 11 Nov, and the one function whose answer I already know.

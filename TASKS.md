@@ -27,7 +27,11 @@ three entries in `docs/doubts.md`, the `notes_faq.md` second passes, and the tea
 - [ ] Q6 second pass: what the penalty is counted per (three dimensions)
 - [ ] Q7 second pass: name the actual NSE files
 - [ ] Rewrite the one-line summary as the mechanism, not a description of the document
-- [ ] First `LEARNING.md` entry
+- [x] First `LEARNING.md` entry. Written 5 Nov covering 2 to 5 Nov, eight lessons, each with
+  a commit or a file behind it. **Drafted by Claude** from observed events because the material
+  was going stale - which is itself lesson 9 and is in the entry. Two sections are left for me:
+  "What confused me" and "Interview questions I could not answer well yet". Rewriting it in my
+  own words is owed
 - [ ] Teach-back: six beats, Why / Count / Cap / Cross / Clear / Cost
 
 ### D2 — Fri 30 Oct
@@ -191,9 +195,8 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
   Claude transcribed it and corrected two answers that were sound but aimed at the wrong
   system - a warm-up replay from my VaR engine, and an order-blocking scope from an RMS.
   That pattern is the day's real lesson and is owed to `LEARNING.md`
-- [ ] **Repayment for #011:** re-derive all four answers from memory into a blank file and
-  diff against the entry, then rewrite the Decision paragraph myself without reading Claude's.
-  Four specific tests are listed at the bottom of #011. First job next session
+- [x] **Repayment for #011:** done 5 Nov. Re-derived from memory. Recorded on Chintamani's
+  word; Claude did not review the result, so this is ticked as self-certified
 - [x] **Update `SPEC.md` rows 4 and 5:** done 4 Nov. Both now carry
   `is_in_ban(futeq_oi, mwpl, was_in_ban_yesterday)`, a note that the third argument selects
   which threshold applies, and two new named tests - one that the 95% entry threshold is not
