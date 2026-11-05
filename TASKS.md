@@ -147,7 +147,15 @@ so it sits behind four rows of `SPEC.md` and the entire `mechanics` block of `co
 ### D6 — Wed 4 Nov
 - [ ] Bhavcopy parser, with a fixture
 - [ ] OI file parser, with a fixture
-- [ ] Automation 9a: GitHub Actions runs the tests on every push **(Claude)**
+- [x] Automation 9a: GitHub Actions runs the tests on every push **(Claude)**. Green on its
+  first run, 37s. Three gates: the package installs on a clean Ubuntu box, nothing under
+  `data/` or any `.env`/PDF/archive is tracked in git, and 51 tests pass without `data/`
+  existing at all. The second gate turns three `CLAUDE.md` rules into a build failure instead
+  of a check I have to remember. Badge added to `README.md`; it stays blank until the repo
+  goes public at v0.1
+- [ ] Two CI warnings to clear when convenient, neither breaking: `actions/checkout@v4` and
+  `actions/setup-python@v5` target the deprecated Node 20, and the `ubuntu-latest` label is
+  migrating to Ubuntu 26
 - [ ] Teach-back
 - [ ] Week 1 interview questions: What is FutEq OI? How is MWPL calculated? Why does a position in a banned stock still matter?
 
