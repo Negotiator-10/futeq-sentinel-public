@@ -365,3 +365,177 @@ Append only. Each entry: the decision, why, the evidence, and the outcome.
     why ban status fails it.
   - Then write the Decision paragraph again myself, from the four answers, without reading
     Claude's version first.
+
+## #012: The point-in-time ban-state store, 6 Nov 2026
+<!-- Authorship. The four decisions below are mine, worked out on 6 Nov after Claude walked
+     the shape of `is_in_ban()` and before the store existed. Claude transcribed them,
+     quantified two against the real file, and in two places did more than transcribe:
+       - it pointed out that my "re-seed from NSE's ban list" contradicts my own #011 Q2,
+         where I had already established that `fo_secban` carries no ISIN and cannot seed
+         anything on its own;
+       - it showed that my 218-of-218 score is circular under the likely reading of the
+         source column, which is the open question at the end of this entry.
+     Decisions 1 and 2 of my original answer are not here: they were already settled in #011
+     and this entry cites them rather than restating them. -->
+
+#011 settled the function and what carrying state means. This entry is about the store that
+holds it: what a record is, what happens when an input is missing, and what feeds forward.
+Everything in #011's Decision paragraph still stands - the `(ISIN, trade_date)` key, the symbol
+held alongside as a label, the previous **trading** day rather than the previous calendar day,
+refusing per scrip rather than per run, and the seed needing `fo_secban` plus a `combineoi`
+close enough to resolve its symbols.
+
+- **1. State only matters inside the dead zone, so a missing previous day blocks seven scrips
+  and not two hundred and eighteen.**
+
+  #011 says to refuse a scrip whose state cannot be established. That is right but broader
+  than it needs to be, because for most scrips the state is irrelevant to the answer. Above
+  the 95% entry the scrip is banned whatever yesterday was; at or below the 80% exit it is
+  free whatever yesterday was. Only inside the band - just above 80%, up to and including 95%,
+  since entry is strict - does the third argument decide anything at all.
+
+  So a missing previous day is not a lost day. Answer every scrip outside the band normally,
+  refuse only the ones inside it, and name them. On 30 Oct that is **7 of 218**: KAYNES
+  92.17%, BANDHANBNK 85.98%, MANAPPURAM 85.67%, SAIL 84.93%, LICHSGFIN 84.37%, INOXWIND
+  84.32%, AMBUJACEM 81.82%. Two of the seven were banned and five were free, which is the
+  point: nothing in the measurement separates them.
+
+  This is the same discipline as `rules.py` refusing on `penalty_rate` - the engine declines
+  exactly where it does not know, and nowhere else. The cost of over-refusing is a report
+  nobody can use; the cost of under-refusing is a guess in the one region where a guess is
+  undetectable.
+
+- **2. Two fields per record. The engine's own output never feeds back into the engine.**
+
+  Each record carries both:
+
+  - **`forecast`** - what the engine computed. Scored against NSE, never read as input.
+  - **`official`** - NSE's published ban list for that date. This is the only thing the next
+    day reads as `was_in_ban_yesterday`.
+
+  The reason is the latch. A wrong ban flag does not decay toward the truth the way a wrongly
+  seeded GARCH variance does; it stays wrong every day until utilisation leaves the band. Run
+  the same flat utilisation path at SAIL's 84.93% from both seeds and they agree on **0 of 20
+  days**. So if the engine's forecast fed forward, one bad night would corrupt an open-ended
+  run of nights, and the run would look entirely self-consistent.
+
+  Feeding the observation forward instead bounds the damage: an engine error costs exactly one
+  scored miss. It also makes the score meaningful, because forecast and input are then
+  independent - the engine is predicting something it was not told.
+
+  **Rejected:** feed `forecast` forward and reconcile against NSE periodically. This is the
+  design that latches. Between reconciliations there is no bound on how long a wrong flag
+  persists, and inside the band there is no measurement that would reveal it.
+
+  **Rejected:** store only `official` and compute the forecast on the fly for the report. It
+  would work, and it throws away the scoring history - which is the project's own claim, and
+  the only evidence that my reading of the rule is right rather than merely consistent.
+
+- **3. A day with no published ban list is reported `unscored`, never `agreed`.**
+
+  #011's missing-file rule was written for the MWPL file. The ban list is the other input and
+  its absence breaks something different: `official` is the only thing that feeds forward, so
+  a missing list leaves the next day with no state to read and leaves the current day with
+  nothing to score against.
+
+  The rule: the day's `official` is **unknown** and is never filled in from `forecast`, since
+  that is exactly the feedback this design exists to prevent. Scrips outside the dead zone are
+  still answered. Scrips inside it are refused until `official` is recovered - either the list
+  arrives late, or the state is re-seeded from a later published list **together with a
+  `combineoi` for a date close enough to resolve its symbols to ISINs**, per #011 Q2, as a
+  logged step. The day is reported `unscored`.
+
+  Counting it as `agreed` would be the dangerous failure. With a base rate of 2 bans in 218
+  securities, a handful of silently-agreed empty days would lift the headline agreement rate
+  without anyone noticing, which is the kind of number that reads as success.
+
+- **4. Every record carries its provenance and the hash of the file it came from.**
+
+  A `source` of `seed`, `computed` or `nse`, plus the hash of the input file. Three values
+  rather than two for the same reason `rules.yaml` has three threshold states: "where did this
+  come from" has more than two answers, and collapsing them loses the one that matters. A
+  `seed` record is an assertion from an observation, a `computed` record is the engine's own
+  work, and an `nse` record is published fact. They are not interchangeable and a reader at
+  18:40 needs to know which one they are looking at.
+
+  The hash is what makes any day traceable back to the bytes it was derived from, and it is
+  the same manifest the file watcher needs, so it is written once and used twice.
+
+- **5. T versus T+1 for the `combineoi` flag is unresolved, and no longer matters.**
+
+  Does `is_in_ban()` computed from 30 Oct's file answer "banned on 30 Oct" or "banned on the
+  next trading day, 2 Nov"? The column is titled **`Limit for Next Day`** and NSE writes
+  `No Fresh Positions` into the cell where its number would go, which argues T+1; `SPEC.md`
+  row 4's end-of-day test argues the same. But the files cannot prove it. On 6 Nov I
+  downloaded `fo_secban_30102026.csv` to settle it and all three sets came back identical:
+
+      30 Oct combineoi flag : KAYNES, SAIL
+      30 Oct ban list       : KAYNES, SAIL
+      02 Nov ban list       : KAYNES, SAIL
+
+  A ban that persists across both days looks the same under either reading, so no diff of
+  these three files can distinguish them.
+
+  **It stops mattering because of where the seed comes from.** `was_in_ban_yesterday` is read
+  from the previous day's published **ban list**, never from the `combineoi` flag. The flag is
+  then only ever an input to the reconciliation in `engine.py`, which compares headroom and
+  does not care which date the suppression refers to. So the ambiguity is quarantined: it
+  cannot reach the forecast, and the forecast is the thing being scored.
+
+  This is also what makes the score non-circular, which is the point. Seeded from the flag,
+  both banned scrips sit inside the dead zone where the forecast IS the seed, so the agreement
+  was a tautology. Seeded from the 30 Oct ban list, the seed, the measurement and the answer
+  come from three different files and none of them is the column being predicted.
+
+  Revisit only if a reconciliation break appears that the T/T+1 reading would explain, or if
+  a ban is ever observed starting and ending inside one day. `docs/READING.md` previously
+  asserted T+1 as established, reasoning from the very coincidence shown above to be
+  non-identifying; corrected on 6 Nov.
+
+- **Decision:** the ban-state store holds one record per `(ISIN, trade_date)` carrying both
+  the engine's `forecast` and NSE's `official` state, where only `official` is ever read
+  forward as `was_in_ban_yesterday`. A missing previous state refuses only the scrips inside
+  the 80-95% band, because outside it the state cannot change the answer. A day with no
+  published ban list is `unscored`, its `official` left unknown rather than filled from the
+  forecast, and recovery is an explicit logged re-seed from a later ban list together with a
+  `combineoi` that resolves its symbols. Every record names its source as `seed`, `computed`
+  or `nse` and carries the hash of the file behind it.
+
+- **Why:** a wrongly seeded ban flag latches instead of decaying, so the single most important
+  property of this store is that nothing the engine computes is ever read back as an input.
+  Everything else follows: if the observation feeds forward, the observation has to be present
+  or the day has to say so; if the forecast is kept but never consumed, it can be scored; and
+  if the two are stored side by side, a reader has to be told which is which.
+
+- **Evidence:** 30 Oct 2026, `combineoi_30102026`, 218 securities. 7 rows sit in the 80-95%
+  band - 2 banned, 5 free - and no row exceeds 95%, so 211 of 218 scrips can be answered with
+  no stored state at all. A flat utilisation path at SAIL's 84.93% replayed from both seeds
+  agrees on **0 of 20 days**; #011's 19-of-20 agreed on the twentieth only because that path
+  eventually fell below the exit.   Forecasting 2 Nov from the 30 Oct file, seeded from the 30 Oct
+  **ban list** rather than that file's own flag, reproduces NSE's published list exactly: 218
+  of 218 scrips agree, 2 true positives and 216 true negatives, no false positive and no false
+  negative, with both ban-list symbols resolving to ISINs on first use. The same forecast
+  seeded from the `combineoi` flag gives the same number and means nothing, because both banned
+  scrips sit inside the dead zone where the forecast is the seed. **What the 218 does not
+  contain: a single transition.** Entry fired 0 times and exit fired 0 times, so only the
+  "held in ban" branch was exercised and 216 of the answers are "nothing happened" on a day
+  whose highest free utilisation was 85.98%. The entry and exit thresholds still have no real
+  test case.
+
+- **Alternatives rejected:** feeding the forecast forward and reconciling periodically, which
+  is the latching design; storing only `official` and recomputing the forecast for the report,
+  which discards the scoring history that is the project's own claim; refusing the whole day
+  when a previous state is missing, which throws away 211 good answers to protect 7; and
+  filling a missing `official` from the forecast, which is the feedback loop wearing a
+  different hat.
+
+- **Outcome:** accepted, 6 Nov 2026, and the five decisions are closed. Nothing implemented
+  yet. The forecast is scored and non-circular, but it has exercised one of three branches, so
+  the next step is a hunt rather than a build: download `fo_secban` for consecutive trading
+  days, diff them to find the dates where a symbol appeared (an entry) or disappeared (a
+  release), and pull the `combineoi` only for the day before each change. Ban lists are 62
+  bytes and `combineoi` is 22 KB, so the cheap file finds the expensive one. The diff needs the
+  trading calendar in `progress.md`, since a holiday read as a change is a phantom transition.
+  Also outstanding from #011's own Outcome and still not done:
+  `SPEC.md` rows 4 and 5 still carry a three-argument `is_in_ban()` with no `rules`, and
+  `PLAN.md` W2 still has no state store in the runner's design.

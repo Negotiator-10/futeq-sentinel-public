@@ -180,6 +180,7 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `combineoi_deleq_30102026.csv` | 17,900 | `5909af2cb4c5bcfd27ead7d316d34260add87f8f7460269baa8592e4f24c3d9d` |
 | `Contract_Delta_30102026.csv` | 6,605,274 | `e061da1005e0e9a5927e2e1c633cbb0bc5a433545c7095426f85c48905230db9` |
 | `fo_secban_02112026.csv` | 62 | `c793e59f34230c54c5eafae90a0d5c5e0174cdfc68b5b2e551fa3f8a5d2c3af2` |
+| `fo_secban_30102026.csv` | 62 | `657f42306413544855e0c232dc1d62b56f6814ab98ae7d806efd7d3d5f2e9859` |
 | `BhavCopy_NSE_FO_0_0_0_20261030_F_0000.csv.zip` | 1,066,684 | `99da5162c5e18aa4f79183a0c546780d07d5c1dedfbbcb5f1a0fbf55af28158b` |
 
 ## `combineoi_<ddmmyyyy>.zip` — MWPL and utilisation, per single stock
@@ -221,9 +222,20 @@ Not a CSV with a header row. Line 1 is prose (`Securities in Ban For Trade Date 
 then one `<n>,<SYMBOL>` line per banned security. A parser that calls `read_csv` on it directly
 will treat the prose line as column names.
 
-On 2 Nov: KAYNES and SAIL. These are exactly the two rows flagged `No Fresh Positions` in the
-30 Oct `combineoi` file, so the T file's last column is NSE's own T+1 ban declaration, and the
-ban forecast can be scored against it directly.
+On both 30 Oct and 2 Nov: KAYNES and SAIL. The same two are also the rows flagged
+`No Fresh Positions` in the 30 Oct `combineoi` file, so all three sets are identical.
+
+I originally read that coincidence as proof that the `combineoi` flag is NSE's T+1 ban
+declaration. It is not proof: a ban that persists across both days looks the same whether the
+flag describes 30 Oct or 2 Nov, so these files cannot distinguish the two readings. The column
+title `Limit for Next Day` is better evidence for T+1 than the coincidence ever was, but it is
+still only an argument. Recorded as unresolved in `DECISIONS.md` #012 decision 5, where it also
+stops mattering: `was_in_ban_yesterday` is seeded from the previous day's **ban list**, never
+from this flag, so the ambiguity cannot reach the forecast.
+
+Scoring a forecast against this file therefore works, but only when the seed comes from the
+previous trading day's ban list. Seeded from the `combineoi` flag the agreement is circular,
+because both banned scrips sit in the 80-95% band where the forecast is the seed.
 
 ## `BhavCopy_NSE_FO_..._F_0000.csv.zip` — UDiFF F&O bhavcopy
 34 columns, including `TckrSymb`, `XpryDt`, `StrkPric`, `OptnTp`, `ClsPric`, `UndrlygPric`,
