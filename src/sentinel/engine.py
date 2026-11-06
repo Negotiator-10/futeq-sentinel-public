@@ -21,6 +21,7 @@ from sentinel.rules import Rules
 __all__ = [
     "utilisation",
     "headroom_shares",
+    "is_in_ban",
     "Residual",
     "BarredCheck",
     "Reconciliation",
@@ -137,6 +138,29 @@ def headroom_shares(row: MwplRow, rules: Rules) -> float:
     """
     entry = rules.value("single_stock.ban.entry_utilisation")
     return entry * row.mwpl - row.futeq_oi
+
+
+def is_in_ban(
+    futeq_oi: float,
+    mwpl: int,
+    *,
+    was_in_ban_yesterday: bool,
+    rules: Rules,
+) -> bool:
+    """Return whether the scrip is in the F&O ban period today.
+
+    This is a state transition, not a measurement: between the exit and entry
+    thresholds neither fires, so the answer depends on yesterday's state.
+
+    Yesterday's state selects which single threshold applies:
+      - already banned -> only the EXIT threshold is consulted
+      - free           -> only the ENTRY threshold is consulted
+    Both thresholds and their operators come from config/rules.yaml.
+    """
+    u = utilisation(futeq_oi, mwpl)
+    if was_in_ban_yesterday:
+        return not rules.compare("single_stock.ban.exit_utilisation", u)
+    return rules.compare("single_stock.ban.entry_utilisation", u)
 
 
 def reconcile(rows: tuple[MwplRow, ...], rules: Rules) -> Reconciliation:
