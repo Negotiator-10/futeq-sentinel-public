@@ -28,6 +28,7 @@ from sentinel.engine import (
     Reconciliation,
     Residual,
     headroom_shares,
+    is_in_ban,
     reconcile,
     utilisation,
 )
@@ -376,3 +377,154 @@ def test_reconciliation_carries_the_trade_date_it_was_given(rules):
     rec = reconcile((make_row(),), rules)
     assert isinstance(rec, Reconciliation)
     assert rec.trade_date == TRADE_DATE
+
+
+# -- is_in_ban: the state transition -------------------------------------------------------
+#
+# SPEC.md rows 4 and 5 both point at this one function, and the cases below are the ones those
+# rows name. MWPL is 100,000,000 throughout so that the OI figures read as percentages.
+#
+# One case named in row 4 is NOT here: `test_ban_entry_is_eod_only`, "an intraday peak above
+# 95% that closes below does not trigger a ban". It cannot be written against this function,
+# which receives one number and it is already an end-of-day number - there is no intraday peak
+# for it to ignore. That rule belongs to whatever feeds this, not here.
+
+MWPL = 100_000_000
+
+
+def banned(oi: float, *, yesterday: bool, rules) -> bool:
+    """is_in_ban with MWPL fixed, so each case reads as a percentage."""
+    return is_in_ban(oi, MWPL, was_in_ban_yesterday=yesterday, rules=rules)
+
+
+def test_ban_entry_is_strictly_greater(rules):
+    # SPEC row 4, from 2025/79 para 5.2.6: the wording is "exceeds", so exactly 95% is NOT a ban.
+    assert banned(94_999_999, yesterday=False, rules=rules) is False
+    assert banned(95_000_000, yesterday=False, rules=rules) is False
+    assert banned(95_000_001, yesterday=False, rules=rules) is True
+
+
+def test_ban_exit_is_inclusive(rules):
+    # SPEC row 5, Master Circular cl 3.3.2.1.2.3: "80% or below", so exactly 80% IS a release.
+    # With the test above this pins both boundaries, inclusive in OPPOSITE directions.
+    assert banned(80_000_001, yesterday=True, rules=rules) is True
+    assert banned(80_000_000, yesterday=True, rules=rules) is False
+
+
+def test_entry_threshold_is_not_applied_when_already_banned(rules):
+    # SPEC row 4's third case. 90% is far below the entry line and the scrip stays banned,
+    # because once banned the ONLY threshold that applies is the 80% exit.
+    assert banned(90_000_000, yesterday=True, rules=rules) is True
+
+
+def test_exit_threshold_is_not_applied_when_not_banned(rules):
+    # The mirror case, which SPEC does not name. A scrip at 50% is nowhere near either
+    # threshold and must stay free. A function that consulted the exit rule here would
+    # "release" something never banned - a silently wrong state rather than a visibly wrong one.
+    assert banned(50_000_000, yesterday=False, rules=rules) is False
+
+
+def test_two_scrips_same_utilisation_opposite_state(rules):
+    # SPEC row 5, from the real file. 30 Oct 2026: SAIL at 84.93% was barred while BANDHANBNK
+    # at 85.98% traded freely. The HIGHER utilisation is the free one. No two-argument function
+    # can produce both answers, which is the proof that the third argument is required.
+    sail_oi, sail_mwpl = REDACTED, REDACTED
+    bandhan_oi, bandhan_mwpl = REDACTED, REDACTED
+
+    assert round(utilisation(sail_oi, sail_mwpl), 4) == 0.8493
+    assert round(utilisation(bandhan_oi, bandhan_mwpl), 4) == 0.8598
+    assert utilisation(bandhan_oi, bandhan_mwpl) > utilisation(sail_oi, sail_mwpl)
+
+    assert is_in_ban(sail_oi, sail_mwpl, was_in_ban_yesterday=True, rules=rules) is True
+    assert is_in_ban(bandhan_oi, bandhan_mwpl, was_in_ban_yesterday=False, rules=rules) is False
+
+
+@pytest.mark.parametrize("fraction", [0.8001, 0.8493, 0.90, 0.9217, 0.95])
+def test_inside_the_dead_zone_only_yesterday_decides(rules, fraction):
+    # The band where NEITHER threshold fires: just above the 80% exit, up to and INCLUDING 95%,
+    # since entry is strict. Across all of it the measurement decides nothing - the same input
+    # returns both answers. Seven of 218 scrips sat in this band on 30 Oct 2026.
+    oi = fraction * MWPL
+    assert banned(oi, yesterday=True, rules=rules) is True
+    assert banned(oi, yesterday=False, rules=rules) is False
+
+
+@pytest.mark.parametrize("fraction", [0.0, 0.50, 0.7999, 0.80])
+def test_at_or_below_the_exit_yesterday_does_not_matter(rules, fraction):
+    # Outside the dead zone the third argument is irrelevant, which is what makes a missing
+    # previous day survivable: 211 of 218 scrips can still be answered. At or below the exit
+    # both paths say free.
+    oi = fraction * MWPL
+    assert banned(oi, yesterday=True, rules=rules) is False
+    assert banned(oi, yesterday=False, rules=rules) is False
+
+
+@pytest.mark.parametrize("fraction", [0.9500001, 0.99, 1.0, 1.5])
+def test_above_the_entry_yesterday_does_not_matter(rules, fraction):
+    # The other side of the same point. Above the entry line both paths say banned, so these
+    # need no stored state either. Over 100% is included because it is reachable: MWPL can be
+    # cut at a quarterly reset while open interest stays where it was.
+    oi = fraction * MWPL
+    assert banned(oi, yesterday=True, rules=rules) is True
+    assert banned(oi, yesterday=False, rules=rules) is True
+
+
+def test_neither_direction_is_written_in_the_engine(rules):
+    # Both boundaries come from the config's `operator`, so moving one in YAML moves the
+    # function. Here the exit is made STRICT, which changes the answer at exactly 80% and
+    # nowhere else - the single input that distinguishes `not rules.compare(exit)` from a
+    # hand-written `u > 0.80`.
+    import dataclasses
+
+    strict_exit = dataclasses.replace(
+        rules.describe("single_stock.ban.exit_utilisation"), operator="<"
+    )
+    patched = type(rules)(
+        {
+            **{p: rules.describe(p) for p in rules},
+            "single_stock.ban.exit_utilisation": strict_exit,
+        },
+        rules.unverified,
+        rules.meta,
+        rules.path,
+    )
+
+    assert banned(80_000_000, yesterday=True, rules=rules) is False   # "80% or below" releases
+    assert banned(80_000_000, yesterday=True, rules=patched) is True  # "below 80%" does not
+
+
+def test_was_in_ban_yesterday_cannot_be_passed_positionally(rules):
+    # Keyword-only on purpose. A positional boolean reads as nothing at the call site, and a
+    # transposed one still type-checks, still runs and still returns a plausible answer.
+    with pytest.raises(TypeError):
+        is_in_ban(50_000_000, MWPL, False, rules)  # type: ignore[misc]
+
+
+def test_bool_cannot_express_an_unknown_previous_state(rules):
+    """A hole, recorded rather than fixed.
+
+    `was_in_ban_yesterday: bool` has two values, so a caller with no stored state - day one, a
+    newly added F&O scrip, a file that never arrived - must pick one. Both calls below are
+    accepted and neither is flagged, and `False` is both the natural pick and the dangerous
+    one, because a genuinely barred scrip then reads as tradeable.
+
+    It does not wash out either: a wrong ban flag latches rather than decaying, so the two
+    seeds disagree on every day until utilisation leaves the dead zone. `rules.py` solved this
+    same shape of problem with three states instead of two. The fix belongs at the boundary
+    that produces the argument - the point-in-time store - not here, so this test exists to
+    keep the hole from being forgotten.
+    """
+    sail_oi, sail_mwpl = REDACTED, REDACTED  # 84.93%, inside the dead zone
+
+    assert is_in_ban(sail_oi, sail_mwpl, was_in_ban_yesterday=True, rules=rules) is True
+    assert is_in_ban(sail_oi, sail_mwpl, was_in_ban_yesterday=False, rules=rules) is False
+
+    # replayed from each seed, they never converge
+    state_true, state_false = True, False
+    agreements = 0
+    for _ in range(20):
+        state_true = is_in_ban(sail_oi, sail_mwpl, was_in_ban_yesterday=state_true, rules=rules)
+        state_false = is_in_ban(sail_oi, sail_mwpl, was_in_ban_yesterday=state_false, rules=rules)
+        agreements += state_true == state_false
+
+    assert agreements == 0
