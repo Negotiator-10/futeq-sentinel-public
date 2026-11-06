@@ -147,3 +147,63 @@ in `#011` and `TASKS.md` exist to work that off, and #011's was done from memory
 Next: the reconciliation. Compute utilisation and headroom from the parsed rows and score them
 against NSE's own published column. It is the first end-to-end result, the spine of v0.1 on
 Wed 11 Nov, and the one function whose answer I already know.
+
+## Fri 6 Nov: Week 2 Day 2 — the engine, and a score that means something
+Yesterday's reconciliation was D3's work done a day early, so D1 and D2 were the open ones.
+Today closed most of D2. Four commits, all pushed.
+
+`src/sentinel/engine.py` now holds four functions. `utilisation()` and `headroom_shares()` are
+one line each; `headroom_shares()` reads 0.95 from the config and matches the arithmetic shape
+of NSE's own column, so the reconciliation residual carries no floating-point difference of my
+own making. `reconcile()` walks all 218 rows down two paths and agrees with NSE on 216 of 216,
+every residual inside [0, 1). I chose the signed test over `|residual| < 1` because NSE
+publishing *more* headroom than the formula allows is a trading risk while publishing less only
+costs opportunity, and an absolute test would not notice the first.
+
+`is_in_ban()` is the one that mattered. Until today it existed in `SPEC.md` rows 4 and 5, in
+`DECISIONS.md` #011, in `LEARNING.md` — and in no Python file anywhere. Four lines: yesterday's
+state selects which single threshold is consulted, and both thresholds come from
+`config/rules.yaml` so neither direction is retyped in code. 21 tests, and Claude then broke the
+function five ways to check the tests would notice; all five were caught, including the two
+hardcoded directions that are numerically correct today and diverge only at one boundary input.
+
+Two things I got wrong and had corrected. I wrote `held = u > exit_threshold`, which fetches the
+value from config and then retypes the direction in Python — the exact thing the `operator`
+field exists to prevent. And my `reconcile()` reported `ok` as true when nothing had been
+compared, so a file with every headroom suppressed would have reconciled clean.
+
+`DECISIONS.md` #012: the point-in-time ban-state store, five decisions. The one I am most
+pleased with is that state only *matters* inside the 80-95% band, so a missing previous day
+refuses 7 of 218 scrips rather than losing the day. The one that matters most is that the
+engine's own forecast never feeds back into the engine — only NSE's published list does — because
+a wrong ban flag latches rather than decaying, and 0 of 20 replayed days agreed between two
+seeds. I also had to be shown that my own #011 Q2 already ruled out re-seeding from the ban list
+alone: `fo_secban` carries no ISIN.
+
+The honest part of the day. My first score — 218 of 218 against NSE's 2 Nov ban list — was
+circular. I had seeded `was_in_ban_yesterday` from the 30 Oct `combineoi` flag, which sits in a
+column titled `Limit for Next Day`, and both banned scrips sit inside the dead zone where the
+forecast *is* the seed. So I was predicting the answer from itself. `docs/READING.md` had made
+the same mistake on 2 Nov, asserting from the identity of three sets that the flag is NSE's T+1
+declaration — an inference that does not hold, because a ban persisting across both days looks
+identical either way. Both are corrected.
+
+Downloading `fo_secban_30102026.csv` fixed it: seed, measurement and answer now come from three
+different files and none is the column being predicted. 218 of 218, 2 true positives and 216 true
+negatives. But entry fired 0 times and exit fired 0 times, so one of three branches ran and 216
+of those answers are "nothing happened" on a day whose highest free utilisation was 85.98%.
+
+So the last thing today was a hunt rather than a build. Twelve more ban lists, downloaded by
+hand, diffed: **three entries and four releases between 12 Oct and 2 Nov**, with KAYNES doing a
+full entry-hold-release-re-entry cycle. Recorded in `docs/READING.md`. Five `combineoi` files
+will turn "the hold branch works" into all three branches scored against NSE's own list.
+
+Two side findings. A 404 on a ban-list URL means no trading session, since NSE publishes a list
+even when nobody is banned — so the download attempt is its own calendar check. And the
+checksum table in `READING.md` has outgrown being written by hand, which is what #012's hash
+manifest is for.
+
+Still open from Week 1 and before: the `SPEC.md` rows 4 and 5 signature, now stale twice;
+`PLAN.md` W2's runner design with no state store in it; `LEARNING.md` rewritten in my own words
+with its two blank sections filled; SURV70553 unread; and the teach-back, now scheduled five
+times.

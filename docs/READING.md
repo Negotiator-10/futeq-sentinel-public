@@ -181,7 +181,112 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `Contract_Delta_30102026.csv` | 6,605,274 | `e061da1005e0e9a5927e2e1c633cbb0bc5a433545c7095426f85c48905230db9` |
 | `fo_secban_02112026.csv` | 62 | `c793e59f34230c54c5eafae90a0d5c5e0174cdfc68b5b2e551fa3f8a5d2c3af2` |
 | `fo_secban_30102026.csv` | 62 | `657f42306413544855e0c232dc1d62b56f6814ab98ae7d806efd7d3d5f2e9859` |
+| `fo_secban_12102026.csv` | 83 | `3240f7a2a38cdf4a097c2e515f9e469eceb6bc977bd2f4bdac27a90019f43fbf` |
+| `fo_secban_13102026.csv` | 92 | `5ea8fa4b81beeb73ef8d9e8bd7bbe29177de40514f29ff0cccd0e28e9f2b0d58` |
+| `fo_secban_14102026.csv` | 67 | `13535288084d1b423b14631e9315b470d195452b40ced7e7f49b3cda86f098c3` |
+| `fo_secban_15102026.csv` | 74 | `553cefe582b83393a0308404540e6cf659124b15f7c0226f1bb747d31bc4e505` |
+| `fo_secban_16102026.csv` | 74 | `13a325bfac762665a38a96855240b19e4d1f8134c0f8d7082f312ff4426490a6` |
+| `fo_secban_19102026.csv` | 74 | `cfffe15162d6d18815a56e2edd7b53bb156af753589dc79559c642b1831ddc7f` |
+| `fo_secban_21102026.csv` | 74 | `98486c266c5069242dbcf1f05bf4a6a32196f306ee0567414e3d30b61373feb4` |
+| `fo_secban_22102026.csv` | 74 | `a1e02e700c8383e4cd110450cd2ddf5c735070b8f38e233eb164696295490ff8` |
+| `fo_secban_23102026.csv` | 74 | `c248d7e7bbd565376d6b2e03f21098f0780761860dfef31ebf79b39bc730acb3` |
+| `fo_secban_26102026.csv` | 74 | `315446155766b2d052e1123760de39fe4062dcdecea3fd0cb975b9e09cc73757` |
+| `fo_secban_28102026.csv` | 53 | `8af926d9d336ee025f59e12224987119104b1d2b3be72a8655263a6f66736662` |
+| `fo_secban_29102026.csv` | 62 | `4f5cd81f624529a94571e2befd5335dfde0d56454bdbd68ad683c217f8f7d699` |
 | `BhavCopy_NSE_FO_0_0_0_20261030_F_0000.csv.zip` | 1,066,684 | `99da5162c5e18aa4f79183a0c546780d07d5c1dedfbbcb5f1a0fbf55af28158b` |
+
+Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
+endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
+served `fo_secban_30102026.csv` byte-identical to the copy above, so it is the same file as the
+archive link. No file for 20 Oct (404, NSE's "file doesn't exist" page) or 27 Oct (404,
+`{"error":"Not Found, file is unavailable"}`); reason not yet checked.
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `fo_secban_12102026.csv` | 83 | `3240f7a2a38cdf4a097c2e515f9e469eceb6bc977bd2f4bdac27a90019f43fbf` |
+| `fo_secban_13102026.csv` | 92 | `5ea8fa4b81beeb73ef8d9e8bd7bbe29177de40514f29ff0cccd0e28e9f2b0d58` |
+| `fo_secban_14102026.csv` | 67 | `13535288084d1b423b14631e9315b470d195452b40ced7e7f49b3cda86f098c3` |
+| `fo_secban_15102026.csv` | 74 | `553cefe582b83393a0308404540e6cf659124b15f7c0226f1bb747d31bc4e505` |
+| `fo_secban_16102026.csv` | 74 | `13a325bfac762665a38a96855240b19e4d1f8134c0f8d7082f312ff4426490a6` |
+| `fo_secban_19102026.csv` | 74 | `cfffe15162d6d18815a56e2edd7b53bb156af753589dc79559c642b1831ddc7f` |
+| `fo_secban_21102026.csv` | 74 | `98486c266c5069242dbcf1f05bf4a6a32196f306ee0567414e3d30b61373feb4` |
+| `fo_secban_22102026.csv` | 74 | `a1e02e700c8383e4cd110450cd2ddf5c735070b8f38e233eb164696295490ff8` |
+| `fo_secban_23102026.csv` | 74 | `c248d7e7bbd565376d6b2e03f21098f0780761860dfef31ebf79b39bc730acb3` |
+| `fo_secban_26102026.csv` | 74 | `315446155766b2d052e1123760de39fe4062dcdecea3fd0cb975b9e09cc73757` |
+| `fo_secban_28102026.csv` | 53 | `8af926d9d336ee025f59e12224987119104b1d2b3be72a8655263a6f66736662` |
+| `fo_secban_29102026.csv` | 62 | `4f5cd81f624529a94571e2befd5335dfde0d56454bdbd68ad683c217f8f7d699` |
+
+The twelve October ban lists above were downloaded by hand on 6 Nov to find a real ban
+transition; 20 and 27 Oct returned 404, which is how I know they were not trading days. NSE
+publishes a list even when nobody is banned - `tests/fixtures/fo_secban_empty.csv` is one - so
+a 404 means no session rather than no bans.
+
+This table has outgrown being written by hand. `DECISIONS.md` #012 decision 4 already says
+every stored record carries the hash of the file behind it, so the next batch should generate
+a tracked manifest instead of pasting rows here.
+
+## Ban transitions, 12 Oct to 2 Nov 2026
+
+Found on 6 Nov by diffing fourteen consecutive `fo_secban` lists. The point was to get a real
+test case for the entry and exit thresholds, which had none: on 30 Oct no scrip in the whole
+file exceeded 95%, so an entry test against that day would have passed vacuously.
+
+| Date | Change | Symbol | Measurement to forecast it from |
+|---|---|---|---|
+| 13 Oct | entry | KAYNES | `combineoi_12102026` |
+| 14 Oct | release | BANDHANBNK | `combineoi_13102026` |
+| 14 Oct | release | LICHSGFIN | `combineoi_13102026` |
+| 15 Oct | entry | SAIL | `combineoi_14102026` |
+| 28 Oct | release | AMBUJACEM | `combineoi_26102026` |
+| 28 Oct | release | KAYNES | `combineoi_26102026` |
+| 29 Oct | entry | KAYNES | `combineoi_28102026` |
+
+Three entries and four releases, from five measurement days.
+
+**The sequence has no holes, which is what makes the list trustworthy.** Four calendar gaps
+appear in it: 16-19 Oct and 23-26 Oct are weekends, and 19-21 and 26-28 Oct are the two
+Tuesdays whose URL returned 404. A transition hidden inside a gap would be invisible to a
+diff, so a gap has to be explained rather than skipped over. All four are.
+
+**The 28 Oct release is measured from 26 Oct, not 27 Oct**, because the 27th was not a trading
+day. First real use of the previous-**trading**-day rule in `DECISIONS.md` #011.
+
+**KAYNES does the full cycle**, which makes it the single most useful scrip in the sample:
+
+    12 Oct  free
+    13 Oct  BANNED      entry
+    14 Oct  BANNED      held
+    ...     BANNED
+    26 Oct  BANNED
+    28 Oct  free        release
+    29 Oct  BANNED      re-entry
+    30 Oct  BANNED
+    02 Nov  BANNED
+
+Entry, nine sessions of hold, release, and re-entry on the very next session. The
+release-to-re-entry edge is the hysteresis boundary and the hardest part to get right, and one
+symbol exercises all of it.
+
+**The 80-95% band is populated by scrips that have been banned.** Of the seven scrips sitting
+in the band on 30 Oct, five had been in ban at some point in the preceding three weeks:
+
+| Symbol | 30 Oct utilisation | In ban 12 Oct - 2 Nov |
+|---|---|---|
+| KAYNES | 92.17% | yes, currently |
+| BANDHANBNK | 85.98% | yes, released 14 Oct |
+| MANAPPURAM | 85.67% | no |
+| SAIL | 84.93% | yes, currently |
+| LICHSGFIN | 84.37% | yes, released 14 Oct |
+| INOXWIND | 84.32% | no |
+| AMBUJACEM | 81.82% | yes, released 28 Oct |
+
+That is what hysteresis predicts: a scrip released at or below 80% sits in the band afterwards
+rather than falling away from it. I derived the mechanism from the clause on 1 Nov; this is the
+distribution agreeing with it, from files I did not have at the time.
+
+**Still to do:** download `combineoi` for 12, 13, 14, 26 and 28 Oct, then forecast each
+transition from the day before it and score it. That is the test the 30 Oct run could not
+provide, because only the hold branch fired there.
 
 ## `combineoi_<ddmmyyyy>.zip` — MWPL and utilisation, per single stock
 Archive of a CSV and an XML with the same 218 records. **Use the CSV.** The XML is not
