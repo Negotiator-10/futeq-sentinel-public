@@ -461,36 +461,39 @@ close enough to resolve its symbols.
   The hash is what makes any day traceable back to the bytes it was derived from, and it is
   the same manifest the file watcher needs, so it is written once and used twice.
 
-- **5. T versus T+1 for the `combineoi` flag is unresolved, and no longer matters.**
+- **5. The `combineoi` flag is a T+1 declaration. Settled 6 Nov, and it never mattered.**
 
-  Does `is_in_ban()` computed from 30 Oct's file answer "banned on 30 Oct" or "banned on the
-  next trading day, 2 Nov"? The column is titled **`Limit for Next Day`** and NSE writes
-  `No Fresh Positions` into the cell where its number would go, which argues T+1; `SPEC.md`
-  row 4's end-of-day test argues the same. But the files cannot prove it. On 6 Nov I
-  downloaded `fo_secban_30102026.csv` to settle it and all three sets came back identical:
+  Does `is_in_ban()` computed from day T's file answer "banned on T" or "banned on T+1"? When I
+  wrote this entry the answer was unknown and I recorded it as unknown. It is now known.
 
-      30 Oct combineoi flag : KAYNES, SAIL
-      30 Oct ban list       : KAYNES, SAIL
-      02 Nov ban list       : KAYNES, SAIL
+  With seven `combineoi` files and fifteen ban lists, the flag can be compared against both
+  candidate dates on the days when those dates differ. It matches T+1 on all seven days, and on
+  **five** of them T and T+1 differ, so those five discriminate. The two that match both are days
+  with no change - which is why 30 Oct alone could never settle it, and why the three identical
+  sets I first reasoned from were non-identifying.
 
-  A ban that persists across both days looks the same under either reading, so no diff of
-  these three files can distinguish them.
+  So the `No Fresh Positions` sentence in day T's file is NSE's ban declaration for T+1.
 
-  **It stops mattering because of where the seed comes from.** `was_in_ban_yesterday` is read
-  from the previous day's published **ban list**, never from the `combineoi` flag. The flag is
-  then only ever an input to the reconciliation in `engine.py`, which compares headroom and
-  does not care which date the suppression refers to. So the ambiguity is quarantined: it
-  cannot reach the forecast, and the forecast is the thing being scored.
+  **Two consequences.** The useful one: the engine's output and NSE's flag are about the same
+  date, so a disagreement is a real disagreement rather than an off-by-one, and the reconciliation
+  in `engine.py` compares like with like.
 
-  This is also what makes the score non-circular, which is the point. Seeded from the flag,
-  both banned scrips sit inside the dead zone where the forecast IS the seed, so the agreement
-  was a tautology. Seeded from the 30 Oct ban list, the seed, the measurement and the answer
-  come from three different files and none of them is the column being predicted.
+  The deflating one: **the answer is in the same file as the inputs.** NSE publishes the T+1 ban
+  determination in the very file whose numbers the engine computes from. There is no time
+  advantage of any size, so what this engine does is reproduce NSE's determination independently,
+  not forecast something unpublished. The honest word is reconciliation. That is also the job
+  description, so it is a narrowing of the claim rather than a loss.
 
-  Revisit only if a reconciliation break appears that the T/T+1 reading would explain, or if
-  a ban is ever observed starting and ending inside one day. `docs/READING.md` previously
-  asserted T+1 as established, reasoning from the very coincidence shown above to be
-  non-identifying; corrected on 6 Nov.
+  **It never mattered for the score**, which is the part worth keeping. `was_in_ban_yesterday` is
+  read from the previous day's published ban list, never from this flag, so the ambiguity was
+  quarantined from the forecast the whole time. Had the seed come from the flag, the agreement
+  would have been circular: both banned scrips on 30 Oct sat inside the dead zone, where the
+  forecast is the seed.
+
+  `docs/READING.md` asserted T+1 on 2 Nov from the non-identifying coincidence, and I corrected it
+  to "unresolved" on 6 Nov before the evidence arrived. Both the claim and the retraction are now
+  superseded by the table above. The lesson is not about this flag: a conclusion can be right while
+  the reasoning for it is worthless, and only the reasoning tells you whether to trust the next one.
 
 - **Decision:** the ban-state store holds one record per `(ISIN, trade_date)` carrying both
   the engine's `forecast` and NSE's `official` state, where only `official` is ever read
@@ -529,13 +532,26 @@ close enough to resolve its symbols.
   filling a missing `official` from the forecast, which is the feedback loop wearing a
   different hat.
 
-- **Outcome:** accepted, 6 Nov 2026, and the five decisions are closed. Nothing implemented
-  yet. The forecast is scored and non-circular, but it has exercised one of three branches, so
-  the next step is a hunt rather than a build: download `fo_secban` for consecutive trading
-  days, diff them to find the dates where a symbol appeared (an entry) or disappeared (a
-  release), and pull the `combineoi` only for the day before each change. Ban lists are 62
-  bytes and `combineoi` is 22 KB, so the cheap file finds the expensive one. The diff needs the
-  trading calendar in `progress.md`, since a holiday read as a change is a phantom transition.
+- **Outcome:** accepted, 6 Nov 2026, all five decisions closed, decision 5 answered the same day
+  it was raised. The store itself is still not implemented - what is implemented is the function
+  it will feed, and the scoring that proves the function reproduces NSE's determination. The forecast is scored and non-circular, but it has exercised one of three branches, so
+  the hunt was done the same day: `fo_secban` for consecutive trading days, diffed
+  to find where a symbol appeared or disappeared, then `combineoi` for the day before each change
+  - 62-byte files locating the 22 KB ones. Seven transitions in three weeks, three entries and
+  four releases.
+
+  **Scored the same evening: 1502 of 1502 scrip-days agree with NSE's published lists across
+  seven measurement days, zero false positives and zero false negatives, and all seven
+  transitions forecast correctly.** Entries at 97.98%, 95.67% and 95.01%; releases at 79.41%,
+  78.82%, 70.02% and 66.96%. Every branch of `is_in_ban()` has now fired on real data. SAIL
+  entered on 29,360 shares past the 95% line on an MWPL of 217 million, which is the case that
+  earns para 5.2.6's "exceeds" and the strict `>` in the config.
+
+  The honest reading of that number: 1,495 of the 1502 are a scrip nowhere near a threshold
+  staying there, so 1502 measures false alarms and **seven** measures the logic. Untested still:
+  either exact boundary (no row has sat on 95.00% or 80.00%), a missing prior state, and a newly
+  listed scrip near a threshold - the universe moved 213 to 219 to 218 inside the sample, so new
+  scrips did appear.
   Also outstanding from #011's own Outcome and still not done:
   `SPEC.md` rows 4 and 5 still carry a three-argument `is_in_ban()` with no `rules`, and
   `PLAN.md` W2 still has no state store in the runner's design.

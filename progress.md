@@ -207,3 +207,44 @@ Still open from Week 1 and before: the `SPEC.md` rows 4 and 5 signature, now sta
 `PLAN.md` W2's runner design with no state store in it; `LEARNING.md` rewritten in my own words
 with its two blank sections filled; SURV70553 unread; and the teach-back, now scheduled five
 times.
+
+### Later the same evening: the result the project was built for
+
+Twelve more ban lists and six more `combineoi` files, downloaded by hand. Seven ban transitions
+between 12 Oct and 2 Nov - three entries, four releases - and the engine forecast every one of
+them correctly. **1502 of 1502 scrip-days agree with NSE's published ban lists, zero false
+positives and zero false negatives.** Entries at 97.98%, 95.67% and 95.01%, releases at 79.41%,
+78.82%, 70.02% and 66.96%, and nothing in the fifteen points between. Every branch of
+`is_in_ban()` has now run on real data; this morning only one had.
+
+SAIL is the row I will use in an interview. At the 14 Oct close it was 29,360 shares past the
+95% line on an MWPL of 217 million - one part in seven thousand - and NSE banned it the next
+day. On 1 Nov I read para 5.2.6, noticed the word "exceeds", and wrote down that a scrip sitting
+exactly on 95% is therefore not in ban. That looked like pedantry about one word. The market
+traded 0.0135 of a percentage point from the case that tests it.
+
+What the number does not mean. 1,495 of those scrip-days are a security nowhere near a
+threshold staying nowhere near it, so 1502 is a statement about false alarms and **seven** is the
+sample that tests the logic. Neither exact boundary has ever been hit, no scored day was missing
+its seed, and no newly listed scrip has yet appeared near a line - though the universe did move
+213 to 219 to 218 inside the sample.
+
+And the claim is narrower than it looked. I proved today that the `No Fresh Positions` flag in
+day T's file is NSE's declaration for T+1, which means the answer sits in the same file as the
+inputs. There is no time advantage at all. What this engine does is reproduce NSE's ban
+determination independently and reconcile against it - which is the job I am applying for, so
+the narrowing costs nothing except the right to use the word "forecast" loosely.
+
+Two corrections to my own work from earlier today. I concluded from a 404 that 27 Oct was not a
+trading day, wrote it into `docs/READING.md` and committed it; a retry returned the file. The
+404 was transient, the 28 Oct release is measured from the 27th rather than the 26th, and 20 Oct
+is still unexplained rather than confirmed as a holiday. And `READING.md` had asserted T+1 on
+2 Nov from three identical sets that cannot distinguish the two readings - the conclusion was
+right and the reasoning was worthless, which are different things.
+
+`PLAN.md` puts validation against NSE in Week 4. It is done, on 6 Nov, and it is the headline
+result for v0.1 on Wed 11 Nov.
+
+Still mine and still not done: `LEARNING.md` in my own words with its two blank sections, the
+four interview questions from today, `SPEC.md` rows 4 and 5, `PLAN.md` W2's runner design, and
+the teach-back.

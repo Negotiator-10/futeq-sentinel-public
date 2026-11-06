@@ -177,6 +177,12 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | File | Bytes | sha256 |
 |---|---|---|
 | `combineoi_30102026.zip` | 22,204 | `076660e6f7452d28f497859483df13903863ec1bbfc4932b0a01737ca291211c` |
+| `combineoi_12102026.zip` | 21,679 | `b232e63b56f369da4194cb2385d451c6ac9c4dd8fb01275f70a9bcf259a6f135` |
+| `combineoi_13102026.zip` | 21,729 | `89a1a844d76e415c58d59a80d84c0ec605aa5610d96f175c09b849ee520fccfc` |
+| `combineoi_14102026.zip` | 21,750 | `01a5d0fffe4adf484ec86da508fab87ffff183f25fc43946ee7148cc580e882e` |
+| `combineoi_26102026.zip` | 21,742 | `6800b35df62d6f39d3fb78d95338118d8d646e282beca9f4294d1434a2b3a256` |
+| `combineoi_27102026.zip` | 21,697 | `746e1781d47a45628b957dcc49dc29775810312a98a9fc68523b143294d9460c` |
+| `combineoi_28102026.zip` | 21,857 | `82532e2221a42b5b95de53402f8fc4bd20065a7db3317342e0eb0cd42e5d2303` |
 | `combineoi_deleq_30102026.csv` | 17,900 | `5909af2cb4c5bcfd27ead7d316d34260add87f8f7460269baa8592e4f24c3d9d` |
 | `Contract_Delta_30102026.csv` | 6,605,274 | `e061da1005e0e9a5927e2e1c633cbb0bc5a433545c7095426f85c48905230db9` |
 | `fo_secban_02112026.csv` | 62 | `c793e59f34230c54c5eafae90a0d5c5e0174cdfc68b5b2e551fa3f8a5d2c3af2` |
@@ -191,6 +197,7 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `fo_secban_22102026.csv` | 74 | `a1e02e700c8383e4cd110450cd2ddf5c735070b8f38e233eb164696295490ff8` |
 | `fo_secban_23102026.csv` | 74 | `c248d7e7bbd565376d6b2e03f21098f0780761860dfef31ebf79b39bc730acb3` |
 | `fo_secban_26102026.csv` | 74 | `315446155766b2d052e1123760de39fe4062dcdecea3fd0cb975b9e09cc73757` |
+| `fo_secban_27102026.csv` | 74 | `5de741a28e20b5f6f625f0c90c798319726d764f63723d9d73a52854b999408f` |
 | `fo_secban_28102026.csv` | 53 | `8af926d9d336ee025f59e12224987119104b1d2b3be72a8655263a6f66736662` |
 | `fo_secban_29102026.csv` | 62 | `4f5cd81f624529a94571e2befd5335dfde0d56454bdbd68ad683c217f8f7d699` |
 | `BhavCopy_NSE_FO_0_0_0_20261030_F_0000.csv.zip` | 1,066,684 | `99da5162c5e18aa4f79183a0c546780d07d5c1dedfbbcb5f1a0fbf55af28158b` |
@@ -198,28 +205,12 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
 served `fo_secban_30102026.csv` byte-identical to the copy above, so it is the same file as the
-archive link. No file for 20 Oct (404, NSE's "file doesn't exist" page) or 27 Oct (404,
-`{"error":"Not Found, file is unavailable"}`); reason not yet checked.
+archive link. **Correction, same day:** 27 Oct first returned 404
+(`{"error":"Not Found, file is unavailable"}`) and was reported missing, but a retry returned
+the file. A JSON 404 from this endpoint can be transient; `combineoi_14102026.zip` did the
+same. 20 Oct returned NSE's HTML "file doesn't exist" page twice; holiday not yet checked
+against NSE's calendar.
 
-| File | Bytes | sha256 |
-|---|---|---|
-| `fo_secban_12102026.csv` | 83 | `3240f7a2a38cdf4a097c2e515f9e469eceb6bc977bd2f4bdac27a90019f43fbf` |
-| `fo_secban_13102026.csv` | 92 | `5ea8fa4b81beeb73ef8d9e8bd7bbe29177de40514f29ff0cccd0e28e9f2b0d58` |
-| `fo_secban_14102026.csv` | 67 | `13535288084d1b423b14631e9315b470d195452b40ced7e7f49b3cda86f098c3` |
-| `fo_secban_15102026.csv` | 74 | `553cefe582b83393a0308404540e6cf659124b15f7c0226f1bb747d31bc4e505` |
-| `fo_secban_16102026.csv` | 74 | `13a325bfac762665a38a96855240b19e4d1f8134c0f8d7082f312ff4426490a6` |
-| `fo_secban_19102026.csv` | 74 | `cfffe15162d6d18815a56e2edd7b53bb156af753589dc79559c642b1831ddc7f` |
-| `fo_secban_21102026.csv` | 74 | `98486c266c5069242dbcf1f05bf4a6a32196f306ee0567414e3d30b61373feb4` |
-| `fo_secban_22102026.csv` | 74 | `a1e02e700c8383e4cd110450cd2ddf5c735070b8f38e233eb164696295490ff8` |
-| `fo_secban_23102026.csv` | 74 | `c248d7e7bbd565376d6b2e03f21098f0780761860dfef31ebf79b39bc730acb3` |
-| `fo_secban_26102026.csv` | 74 | `315446155766b2d052e1123760de39fe4062dcdecea3fd0cb975b9e09cc73757` |
-| `fo_secban_28102026.csv` | 53 | `8af926d9d336ee025f59e12224987119104b1d2b3be72a8655263a6f66736662` |
-| `fo_secban_29102026.csv` | 62 | `4f5cd81f624529a94571e2befd5335dfde0d56454bdbd68ad683c217f8f7d699` |
-
-The twelve October ban lists above were downloaded by hand on 6 Nov to find a real ban
-transition; 20 and 27 Oct returned 404, which is how I know they were not trading days. NSE
-publishes a list even when nobody is banned - `tests/fixtures/fo_secban_empty.csv` is one - so
-a 404 means no session rather than no bans.
 
 This table has outgrown being written by hand. `DECISIONS.md` #012 decision 4 already says
 every stored record carries the hash of the file behind it, so the next batch should generate
@@ -237,19 +228,23 @@ file exceeded 95%, so an entry test against that day would have passed vacuously
 | 14 Oct | release | BANDHANBNK | `combineoi_13102026` |
 | 14 Oct | release | LICHSGFIN | `combineoi_13102026` |
 | 15 Oct | entry | SAIL | `combineoi_14102026` |
-| 28 Oct | release | AMBUJACEM | `combineoi_26102026` |
-| 28 Oct | release | KAYNES | `combineoi_26102026` |
+| 28 Oct | release | AMBUJACEM | `combineoi_27102026` |
+| 28 Oct | release | KAYNES | `combineoi_27102026` |
 | 29 Oct | entry | KAYNES | `combineoi_28102026` |
 
 Three entries and four releases, from five measurement days.
 
-**The sequence has no holes, which is what makes the list trustworthy.** Four calendar gaps
-appear in it: 16-19 Oct and 23-26 Oct are weekends, and 19-21 and 26-28 Oct are the two
-Tuesdays whose URL returned 404. A transition hidden inside a gap would be invisible to a
-diff, so a gap has to be explained rather than skipped over. All four are.
+**Gaps have to be explained, not skipped.** A transition that starts and ends inside a gap is
+invisible to a diff, so an unexplained gap makes the list "what I happened to find" rather than
+"all of it". After the 27 Oct retry the remaining gaps are 16-19 Oct and 23-26 Oct, both
+weekends, and 19-21 Oct, which is the 20th. **20 Oct is still not accounted for**: it returned
+NSE's HTML "file doesn't exist" page twice, which is a different failure from the transient JSON
+404 that 27 Oct gave, but it has not been checked against NSE's published holiday calendar. Until
+it is, a transition on 20 or 21 Oct cannot be ruled out.
 
-**The 28 Oct release is measured from 26 Oct, not 27 Oct**, because the 27th was not a trading
-day. First real use of the previous-**trading**-day rule in `DECISIONS.md` #011.
+**The 28 Oct release is measured from 27 Oct.** I first wrote 26 Oct here, having concluded from
+a 404 that the 27th was not a trading day. It was. Correcting it moved the measurement day and
+cost one more download - see the correction note above the checksum table.
 
 **KAYNES does the full cycle**, which makes it the single most useful scrip in the sample:
 
@@ -287,6 +282,56 @@ distribution agreeing with it, from files I did not have at the time.
 **Still to do:** download `combineoi` for 12, 13, 14, 26 and 28 Oct, then forecast each
 transition from the day before it and score it. That is the test the 30 Oct run could not
 provide, because only the hold branch fired there.
+
+## Scoring the ban rule against NSE, 12 Oct to 2 Nov 2026
+
+Run on 6 Nov across every `combineoi` on disk. For each measurement day the seed is **that
+day's published ban list**, resolved to ISINs through that day's `combineoi` (per #011 Q2,
+since `fo_secban` carries no ISIN); the input is that day's utilisation; the answer is the next
+day's published ban list. Nothing reads the `combineoi`'s own `No Fresh Positions` flag, so no
+step in the chain sees the answer.
+
+| measurement | forecast for | agree | false pos | false neg |
+|---|---|---|---|---|
+| 12 Oct | 13 Oct | 213/213 | 0 | 0 |
+| 13 Oct | 14 Oct | 213/213 | 0 | 0 |
+| 14 Oct | 15 Oct | 213/213 | 0 | 0 |
+| 26 Oct | 27 Oct | 213/213 | 0 | 0 |
+| 27 Oct | 28 Oct | 213/213 | 0 | 0 |
+| 28 Oct | 29 Oct | 219/219 | 0 | 0 |
+| 30 Oct | 2 Nov | 218/218 | 0 | 0 |
+| **total** | | **1502/1502** | **0** | **0** |
+
+All seven transitions were forecast correctly, and the utilisation at the prior close shows
+which branch fired:
+
+| effective | symbol | direction | utilisation at prior close |
+|---|---|---|---|
+| 13 Oct | KAYNES | entry | 97.98% |
+| 14 Oct | BANDHANBNK | release | 79.41% |
+| 14 Oct | LICHSGFIN | release | 78.82% |
+| 15 Oct | SAIL | entry | 95.01% |
+| 28 Oct | AMBUJACEM | release | 70.02% |
+| 28 Oct | KAYNES | release | 66.96% |
+| 29 Oct | KAYNES | entry | 95.67% |
+
+Three entries all just above 95%, four releases all at or below 80%, and nothing in the fifteen
+points between - the hysteresis band, empty of transitions by construction.
+
+**SAIL on 15 Oct is the row that justifies the wording.** At the 14 Oct close its FutEq OI was
+206,047,699.58 against an MWPL of REDACTED: utilisation 95.0135%, which is **29,360 shares**
+past the line on a limit of 217 million, one part in seven thousand. NSE banned it. Para 5.2.6
+says "exceeds", so the config operator is `>`; I noted on 1 Nov that a scrip sitting exactly on
+95% is therefore not in ban, which read as pedantry about a single word. This row is 0.0135 of a
+percentage point from being the case that tests it.
+
+**What the 1502 does and does not establish.** 1,495 of those scrip-days are a security nowhere
+near either threshold staying nowhere near it, so the number is a statement about false alarms:
+zero, across 1502 scrip-days. The test of the *logic* has a sample of **seven**. Still untested:
+the exact boundaries (95.01% is not 95.00%, and no row has ever sat on either line), a missing or
+unknown prior state (every scored day had its seed), and a newly listed scrip near a threshold -
+the universe moved 213 to 219 to 218 within the sample, so new scrips did appear, none of them
+close to a line.
 
 ## `combineoi_<ddmmyyyy>.zip` — MWPL and utilisation, per single stock
 Archive of a CSV and an XML with the same 218 records. **Use the CSV.** The XML is not
@@ -331,12 +376,30 @@ On both 30 Oct and 2 Nov: KAYNES and SAIL. The same two are also the rows flagge
 `No Fresh Positions` in the 30 Oct `combineoi` file, so all three sets are identical.
 
 I originally read that coincidence as proof that the `combineoi` flag is NSE's T+1 ban
-declaration. It is not proof: a ban that persists across both days looks the same whether the
-flag describes 30 Oct or 2 Nov, so these files cannot distinguish the two readings. The column
-title `Limit for Next Day` is better evidence for T+1 than the coincidence ever was, but it is
-still only an argument. Recorded as unresolved in `DECISIONS.md` #012 decision 5, where it also
-stops mattering: `was_in_ban_yesterday` is seeded from the previous day's **ban list**, never
-from this flag, so the ambiguity cannot reach the forecast.
+declaration. It was not proof: a ban persisting across both days looks the same under either
+reading, so those three files could not distinguish them. **The conclusion was right and the
+reasoning was not**, which is worth separating, because the first one is luck.
+
+**Settled on 6 Nov, with evidence that discriminates.** With seven `combineoi` files and fifteen
+ban lists, the flag can be compared against both candidate dates on days when they differ:
+
+| `combineoi` date | flag set | = that day's ban list? | = next trading day's? |
+|---|---|---|---|
+| 12 Oct | AMBUJACEM, BANDHANBNK, KAYNES, LICHSGFIN | no | **yes** |
+| 13 Oct | AMBUJACEM, KAYNES | no | **yes** |
+| 14 Oct | AMBUJACEM, KAYNES, SAIL | no | **yes** |
+| 26 Oct | AMBUJACEM, KAYNES, SAIL | yes | yes |
+| 27 Oct | SAIL | no | **yes** |
+| 28 Oct | KAYNES, SAIL | no | **yes** |
+| 30 Oct | KAYNES, SAIL | yes | yes |
+
+T+1 on all seven, and on **five** of them the two candidates differ, so those five discriminate.
+The two that match both are days where nothing changed - which is why 30 Oct on its own could
+never have settled it.
+
+So the `No Fresh Positions` flag in day T's file is NSE's ban declaration for T+1. It also means
+the answer to the ban question is in the same file as the inputs, so reproducing it is a
+reconciliation and not a forecast with any time advantage.
 
 Scoring a forecast against this file therefore works, but only when the seed comes from the
 previous trading day's ban list. Seeded from the `combineoi` flag the agreement is circular,
