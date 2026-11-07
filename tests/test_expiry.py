@@ -30,7 +30,10 @@ from decimal import Decimal
 
 import pytest
 
-from sentinel.book import DeltaFactors, Instrument, Position, futeq_delta, live_on
+from sentinel.book import DeltaFactors, Instrument, Position, PropBook, futeq_delta, live_on
+from sentinel.calendar import load_calendar
+from sentinel.engine import check_ban_period_reduction
+from sentinel.rules import load_rules
 
 ISIN = "INE114A01011"
 SYMBOL = {ISIN: "SAIL"}
@@ -64,16 +67,25 @@ def factors(day: dt.date, *expiries: dt.date) -> DeltaFactors:
     })
 
 
-def verdict(yesterday_positions, today_positions, day: dt.date, *expiries: dt.date):
-    """Apply the permitted band, returning (permitted, baseline, today).
+_RULES = load_rules(warn=False)
+_CALENDAR = load_calendar()
 
-    baseline = YESTERDAY's holdings, expired contracts dropped, at TODAY's factors.
+
+def verdict(yesterday_positions, today_positions, day: dt.date, *expiries: dt.date):
+    """Run check_ban_period_reduction() itself, returning (permitted, baseline, today).
+
+    Until 8 Nov this applied the band directly, because the function did not exist yet. It now
+    calls the function, so these seven cases check the code rather than the arithmetic beside it.
+    An empty list of today's positions is a VERIFIED flat day, built the only way #015 allows.
     """
-    today_factors = factors(day, *expiries)
-    baseline = futeq_delta(live_on(yesterday_positions, day), today_factors, SYMBOL)
-    today = futeq_delta(today_positions, today_factors, SYMBOL)
-    permitted = today * baseline >= 0 and abs(today) <= abs(baseline)
-    return permitted, baseline, today
+    yesterday_day = yesterday_positions[0].trade_date
+    yesterday = PropBook(yesterday_positions)
+    today = PropBook(today_positions) if today_positions else PropBook.flat(day)
+    (check,) = check_ban_period_reduction(
+        today, yesterday, factors(day, *expiries), factors(yesterday_day, *expiries),
+        SYMBOL, frozenset({ISIN}), _CALENDAR, _RULES,
+    )
+    return check.permitted, check.baseline, check.today_delta
 
 
 # -- the seven cases ----------------------------------------------------------------------

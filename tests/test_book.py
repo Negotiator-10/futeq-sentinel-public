@@ -254,38 +254,9 @@ def test_table_2_reproduces_day_by_day(books, deltas, day):
     assert baseline == pytest.approx(expected_baseline)
 
 
-def test_day_5_is_the_breach_and_the_others_are_not(books, deltas):
-    """Applying the permitted band to every day: only Table 2's day 5 fails.
-
-    permitted if  delta_today * baseline >= 0  and  |delta_today| <= |baseline|
-    """
-    verdicts = {}
-    days = sorted(books)
-    for previous, day in zip(days, days[1:]):
-        today = futeq_delta(books[day], deltas[day], SYMBOL)
-        baseline = futeq_delta(books[previous], deltas[day], SYMBOL)
-        # No epsilon. The first version of this test carried `+ 1e-9`, which was papering over
-        # float sums that could differ by about 1e-12 for identical holdings. With Decimal
-        # factors the two come out exactly equal, so the band can be compared exactly - and
-        # having to add an epsilon here again would mean the exactness had been lost.
-        verdicts[day] = today * baseline >= 0 and abs(today) <= abs(baseline)
-
-    assert verdicts[dt.date(2026, 10, 16)] is False          # day 5: a second futures lot
-    assert all(v for d, v in verdicts.items() if d != dt.date(2026, 10, 16))
-
-
-def test_a_zero_baseline_permits_only_zero():
-    """"No Fresh Positions" is a consequence of the band, not a separate rule.
-
-    With no position yesterday the baseline is 0, so |delta_today| <= 0 forces delta_today to
-    0 - which is exactly the prohibition on opening a position in a banned scrip.
-    """
-    factors = DeltaFactors(DAY, {("SAIL", Instrument.FUT, EXPIRY, Decimal(0)): Decimal("1.00000000")})
-    baseline = futeq_delta([], factors, SYMBOL)
-    assert baseline == 0.0
-
-    today = futeq_delta([pos(qty=1)], factors, SYMBOL)
-    assert not (today * baseline >= 0 and abs(today) <= abs(baseline))
+# Two tests that lived here applied the permitted band directly, before the function existed:
+# day 5 as the only breach, and a zero baseline admitting only zero. Both now run through
+# check_ban_period_reduction() itself in tests/test_ban_reduction.py, so they are not repeated.
 
 
 def test_the_passive_increase_on_day_7_is_entirely_passive(books, deltas):

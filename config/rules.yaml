@@ -130,6 +130,18 @@ single_stock:
       source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.3.2, Table 2 day 5"
       verified: 2026-11-02
       note: "A second lot bought during a ban: not permitted. Same arithmetic as the row above, different cause, opposite answer."
+    reduction_floor:
+      value: 0
+      operator: ">="
+      note: "today's FutEq delta expressed in the baseline's direction: stays on the same side of zero, zero inclusive"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.3.2 ('reduced till 0'), Table 2"
+      verified: 2026-11-07
+    reduction_ceiling:
+      value: 0
+      operator: "<="
+      note: "growth = |today| - |baseline|: no increase in magnitude"
+      source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.3.3, Table 2 day 5"
+      verified: 2026-11-07
     penalty_rate:
       value: null
       source: "UNVERIFIED. Structure is SEBI/HO/MRD-PoD2/CIR/P/2024/00181 Ch 5 cl 3.3.2.1.2.2, read 2 Nov 2026; the RATE is set by the Exchange, not by SEBI"
