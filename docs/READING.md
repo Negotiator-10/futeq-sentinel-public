@@ -201,6 +201,8 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `fo_secban_28102026.csv` | 53 | `8af926d9d336ee025f59e12224987119104b1d2b3be72a8655263a6f66736662` |
 | `fo_secban_29102026.csv` | 62 | `4f5cd81f624529a94571e2befd5335dfde0d56454bdbd68ad683c217f8f7d699` |
 | `BhavCopy_NSE_FO_0_0_0_20261030_F_0000.csv.zip` | 1,066,684 | `99da5162c5e18aa4f79183a0c546780d07d5c1dedfbbcb5f1a0fbf55af28158b` |
+| `Trading holiday for NSE.pdf` | 176,660 | `5a2079cd78b2e6b536ef0d28300e63b645721bed22cc82a91facf5945f3296ea` |
+| `combineoi_26082026.zip` | 21,000 | `5509c496379979f3142920fc07993fc1193ad7989ab3d19479106b923cc5e117` |
 
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
@@ -332,6 +334,61 @@ the exact boundaries (95.01% is not 95.00%, and no row has ever sat on either li
 unknown prior state (every scored day had its seed), and a newly listed scrip near a threshold -
 the universe moved 213 to 219 to 218 within the sample, so new scrips did appear, none of them
 close to a line.
+
+## The trading calendar, and the clearing list that is not the same thing
+
+`config/calendar_2026.csv` is generated from **NSE circular NSE/FAOP/71777, Ref 212/2025, dated
+12 Dec 2025** - the PDF above. It notifies the F&O trading holidays for calendar year 2026:
+fifteen weekday holidays, four falling on a Saturday or Sunday, and one line that decided a
+design question:
+
+> *Muhurat Trading will be conducted on Sunday, November 08, 2026. Timings of Muhurat Trading
+> shall be notified subsequently.*
+
+So 8 Nov 2026 is a listed Sunday holiday **with a session on it**. That is why a date has four
+states rather than three; see `DECISIONS.md` #013.
+
+Two dates this settles that were previously guesses:
+
+* **20 Oct 2026 is Dussehra** (item 12). It had been `UNKNOWN` - no ban list on disk - and on
+  6 Nov Claude wrongly concluded from a 404 that it was a holiday and wrote that into this file
+  and a commit. The circular makes it a deduction from a primary source instead.
+* **The 30 Oct to 2 Nov gap** is a plain weekend, so the one row in the scoring that rested on
+  an inference now rests on the circular.
+
+### Trading holidays are not clearing holidays
+
+NSE publishes a separate clearing-holiday list. There was no download option for it, so it is
+reproduced below as pasted text and is therefore **unverified** in this project's sense - no
+file, no checksum. It is used for nothing; it is recorded because the comparison matters.
+
+It is a **superset** of the trading holidays. Every trading holiday appears in it, plus five
+dates in 2026 when the market trades and the clearing corporation is shut:
+
+| Date | Day | Description |
+|---|---|---|
+| 15 Jan 2026 | Thursday | Municipal Corporation Election in Maharashtra |
+| 19 Feb 2026 | Thursday | Chhatrapati Shivaji Maharaj Jayanti |
+| 19 Mar 2026 | Thursday | Gudhi Padwa |
+| 1 Apr 2026 | Wednesday | Annual Bank Closing |
+| 26 Aug 2026 | Wednesday | Id-E-Milad |
+
+This looked load-bearing, because `combineoi` is served from the clearing corporation's own
+archive path - `/archives/nsccl/mwpl/`, where `nsccl` is NSE Clearing. If the MWPL file were not
+published on a clearing holiday, each of those five dates would be a trading day with no
+measurement file, which #012's four-case matrix reads as "missing file, state unknown, refuse
+the dead zone". That would be a false alarm: the file would never have been published rather
+than lost.
+
+**It is not load-bearing.** All five dates had passed, so one download settled it:
+`combineoi_26082026.zip` exists, parses, and carries 211 rows for 26 Aug 2026 - a clearing
+holiday that was a trading day. The calendar needs one axis, not two.
+
+**That is one observation of five dates, and one of the two daily files.** A systematic
+non-publication would have shown up here, which is why it is acted on, but it is n=1 and is not
+a rule. The ban-list half is untested; `fo_secban` is served from `/archives/fo/sec_ban/` - the
+F&O segment rather than the clearing corporation - and the segment was open that day, which is
+reasoning and not a file. `fo_secban_26082026.csv` would close it for 62 bytes.
 
 ## `combineoi_<ddmmyyyy>.zip` — MWPL and utilisation, per single stock
 Archive of a CSV and an XML with the same 218 records. **Use the CSV.** The XML is not

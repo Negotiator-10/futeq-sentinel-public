@@ -32,6 +32,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from sentinel.calendar import (  # noqa: E402
+    ChainUnverifiedError,
+    UnknownDateError,
+    load_calendar,
+)
 from sentinel.engine import is_in_ban, utilisation  # noqa: E402
 from sentinel.parsers import parse_ban_list, parse_mwpl_file  # noqa: E402
 from sentinel.rules import load_rules  # noqa: E402
@@ -51,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     rules = load_rules(warn=False)
+    calendar = load_calendar()
+    print(f"calendar: {calendar!r}")
 
     bans: dict[dt.date, frozenset[str]] = {}
     for p in sorted(args.data.glob("fo_secban_*.csv")):
@@ -78,14 +85,31 @@ def main(argv: list[str] | None = None) -> int:
     skipped: list[str] = []
 
     for day in sorted(days):
-        later = [d for d in ban_dates if d > day]
         if day not in bans:
             skipped.append(f"{day}: no ban list for the measurement day, so no seed")
             continue
-        if not later:
-            skipped.append(f"{day}: no later ban list, so nothing to score against")
+
+        # The next trading day comes from the verified calendar, never from "the next date
+        # with a file". Conflating the two was a real bug: hide one ban list and this scored
+        # 14 Oct's forecast against 16 Oct's published answer, skipped the 15th entirely, and
+        # still reported 1502 of 1502 with exit 0. The calendar refuses rather than skipping.
+        try:
+            nxt = calendar.next_trading_day(day)
+        except ChainUnverifiedError as exc:
+            skipped.append(f"{day}: {exc}")
             continue
-        nxt = later[0]
+        except UnknownDateError as exc:
+            skipped.append(f"{day}: {exc}")
+            continue
+
+        if nxt not in bans:
+            skipped.append(
+                f"{day}: the next trading day is {nxt} and its ban list is not on disk, so "
+                f"there is nothing to score against. NOT scored against a later list - that "
+                f"would answer the wrong day's question."
+            )
+            continue
+
         rows = days[day]
 
         by_symbol = {r.symbol: r for r in rows}

@@ -555,3 +555,143 @@ close enough to resolve its symbols.
   Also outstanding from #011's own Outcome and still not done:
   `SPEC.md` rows 4 and 5 still carry a three-argument `is_in_ban()` with no `rules`, and
   `PLAN.md` W2 still has no state store in the runner's design.
+
+## #013: The trading calendar, and the fourth state, 7 Nov 2026
+<!-- Authorship. The four-state decision and the reasoning for it are mine, made on 7 Nov
+     before the calendar existed. Claude implemented it, found the next-trading-day bug that
+     made the calendar necessary in the first place, compared the two holiday lists, and wrote
+     this entry from my answer. The clearing-holiday question was mine to notice: I pasted
+     that second list because the download was not available, which is the only reason the
+     difference came to light. -->
+
+`#012` said the engine loads the state for the previous **trading** day. It did not say where
+the calendar comes from, and that turned out to matter more than the store itself.
+
+- **1. The calendar exists because of a bug, not a plan.**
+
+  `scripts/score_bans.py` took "the next trading day" to mean "the next date for which a file
+  happens to be on disk". Hiding one ban list made it score 14 Oct's forecast against 16 Oct's
+  published answer, skip the 15th entirely, report **1502 of 1502 with zero errors**, and exit
+  0. A missing file silently re-dated the answer and the result still looked perfect.
+
+  I had the problem the wrong way round when I set the task: I thought the calendar was for
+  resolving the previous trading day, and the live bug was in the next one.
+
+- **2. A date has four states.**
+
+      TRADING          a session happened, verified against NSE's published calendar
+      SPECIAL_SESSION  a session happened on a day that is not a normal trading day
+      HOLIDAY          no session, verified the same way
+      UNKNOWN          no verified calendar covers this date
+
+  The first three and `UNKNOWN` are the same move as the three threshold states in `rules.py`
+  and the three `source` values in `#012`: "I do not know" gets its own state rather than being
+  forced into one of the others. `UNKNOWN` cannot be written down, only inferred from absence -
+  a recorded `UNKNOWN` would make an unverified date look verified.
+
+  An empty calendar knows nothing and says so. It does not default to "weekdays are trading
+  days", which is the same inference wearing a better coat.
+
+- **3. `SPECIAL_SESSION` is a state, not a flag on `TRADING`.**
+
+  This is the decision I was asked for and it is the one worth defending. The open question
+  about Muhurat trading is **not** whether there is data on 8 Nov 2026 - there will be. It is
+  whether that session counts as the previous trading day for 9 Nov's ban state. I do not know
+  yet. A flag on a trading day would quietly answer "yes" by default. A fourth state forces the
+  store to treat it explicitly: accept its files, decide separately how it chains, and refuse
+  until that is verified.
+
+  So `has_session()` is true for it and its data is stored, while `next_trading_day()` and
+  `previous_trading_day()` raise `ChainUnverifiedError` on it - a different exception from
+  `UnknownDateError`, because the date is not unknown. The calendar knows exactly what it is;
+  what is unknown is its place in the chain.
+
+  The consequence is concrete and lands in two days: **Monday 9 Nov's run will refuse to seed**
+  until the chaining is settled. That is fail-closed, which is the point. After Sunday's
+  session, check whether NSE's next published ban list carries 8 Nov's state forward, record the
+  answer here, and pass the date in `chaining_verified`.
+
+  NSE's own wording is why caution is right rather than fussy. Circular NSE/FAOP/71777 lists
+  8 Nov as a Sunday holiday and says in the same breath that "Muhurat Trading will be conducted
+  on Sunday, November 08, 2026", with timings "notified subsequently" - the exchange had not
+  settled the session's shape when it published the calendar.
+
+- **4. The calendar is reference data, not typed configuration.**
+
+  A hand-typed date list cannot be verified, and one typo becomes a silent stale seed - which
+  is the error this whole module exists to prevent. So it is generated from NSE's own published
+  circular, whose checksum is recorded in `docs/READING.md`, and `config/calendar_2026.csv`
+  carries **one source string per row**, the same per-key provenance as `config/rules.yaml`
+  (#007). A row with no source is refused at load time.
+
+  The file lists only the exceptions. Every other weekday in the covered year is a trading day,
+  and **that complement is a deduction rather than a guess**: the circular says "the Exchange
+  hereby notifies trading holidays for the calendar year 2026 as below", which is exhaustive for
+  that year. It holds only inside the stated year, which is why a `year_covered` row is required
+  and a calendar without one is refused - without a boundary, 2030 would silently look like
+  trading days. Weekends are holidays by rule rather than by the circular, which lists only the
+  weekend dates carrying a named holiday; the Muhurat Sunday is exactly why the file has to be
+  able to override that rule.
+
+- **5. Clearing holidays are a finding, not a dimension. Tested, n=1.**
+
+  NSE publishes a separate clearing-holiday list, and it is a **superset** of the trading
+  holidays: every trading holiday appears in it, plus five more in 2026 - 15 Jan (Municipal
+  Corporation Election), 19 Feb (Chhatrapati Shivaji Maharaj Jayanti), 19 Mar (Gudhi Padwa),
+  1 Apr (Annual Bank Closing) and 26 Aug (Id-E-Milad). On those five dates the market trades
+  and the clearing corporation is shut.
+
+  That looked load-bearing, because `combineoi` is served from the clearing corporation's own
+  archive path, `/archives/nsccl/mwpl/`. If the MWPL file were not published on a clearing
+  holiday, those five dates would be a trading day with no measurement file - which `#012`'s
+  four-case matrix reads as "missing file, state unknown, refuse the dead zone". A false alarm:
+  the file would never have been published rather than lost.
+
+  All five dates had passed, so one download settled it. `combineoi_26082026.zip` exists, parses,
+  and carries 211 rows for 26 Aug 2026 - a clearing holiday that was a trading day. So the
+  calendar needs one axis, not two.
+
+  **This rests on one observation of five dates, and on one of the two files.** A systematic
+  non-publication would have shown up here, which is why I am willing to act on it, but it is
+  n=1 and the entry says so rather than stating a rule. The ban list half is untested; the
+  reason I expect it to hold is that `fo_secban` is served from `/archives/fo/sec_ban/` - the
+  F&O segment, not the clearing corporation - and the segment was open that day. That is
+  reasoning, not a file.
+
+- **6. Twenty October closes.**
+
+  On 6 Nov the date was `UNKNOWN`: no ban list, and I had wrongly concluded from a 404 that it
+  was a holiday and written that into `docs/READING.md` and a commit. The circular settles it -
+  item 12, Dussehra - so the walk across it is now a deduction from a primary source rather than
+  an inference from a failed download. The two situations are worth keeping side by side: I had
+  a belief and acted on it; Chintamani had a belief about the same date and refused to let the
+  engine act on it until the file was in the repo.
+
+- **Decision:** the trading calendar is loaded from `config/calendar_2026.csv`, generated from
+  NSE circular NSE/FAOP/71777 with its checksum recorded, carrying one source per row and a
+  required `year_covered` boundary. A date has four states, with `SPECIAL_SESSION` separate from
+  `TRADING` so that a special session's data is accepted while chaining through it refuses until
+  verified. Clearing holidays are recorded as a finding and not modelled. `score_bans.py` asks
+  the calendar and no longer infers; where the next trading day's ban list is absent it reports
+  the day as unscored rather than scoring against a later list.
+
+- **Why:** the engine's answer is dated, so every operation that moves between dates has to be
+  a fact rather than a guess. Inferring the calendar from which files exist makes a missing file
+  indistinguishable from a holiday, and that difference decides which day's published answer a
+  forecast is scored against.
+
+- **Evidence:** hiding `fo_secban_15102026.csv` made the old script score 14 Oct against 16 Oct
+  and still report 1502 of 1502 with exit 0. With the calendar, the same removal drops the day
+  explicitly and the total falls to 1289 of 1289 - 213 fewer, exactly the one measurement day,
+  named with its reason. The two holiday lists differ by five dates, and
+  `combineoi_26082026.zip` (21,000 bytes, 211 rows) shows the MWPL file is published on a
+  clearing holiday. 41 store and calendar tests; suite 132 to 173.
+
+- **Alternatives rejected:** a flag on `TRADING` for the special session, which answers the
+  chaining question by default; inferring trading days from file presence, which is the bug;
+  a hand-typed holiday list, which cannot be verified and whose typos are silent; and modelling
+  the clearing calendar as a second axis, which the 26 Aug file shows is unnecessary.
+
+- **Outcome:** accepted, 7 Nov 2026. One thing deliberately left open and failing closed: the
+  chaining of Sun 8 Nov, which Monday's run will refuse until observed. Also open: the ban-list
+  half of the clearing question, and whether NSE amends the 2026 circular.
