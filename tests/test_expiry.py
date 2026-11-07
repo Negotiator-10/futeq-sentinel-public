@@ -36,12 +36,18 @@ ISIN = "INE114A01011"
 SYMBOL = {ISIN: "SAIL"}
 LOT = 1000
 
-#: October expires on the 29th; November on the 26th, because the 24th is Guru Nanak Jayanti
-#: (NSE/FAOP/71777) and NSE moves an expiry earlier when it falls on a holiday. The contract's
-#: own `expiry` field already reflects that, which is why the rule reads the field rather than
-#: computing a last Thursday.
-OCT = dt.date(2026, 10, 29)
-NOV = dt.date(2026, 11, 26)
+#: Real NSE expiry dates, read out of the bhavcopies rather than assumed. NSE's expiry is
+#: **Tuesday**, not the last Thursday - SEBI moved it in 2025 - and it shifts EARLIER to the
+#: Monday when that Tuesday is a holiday. October's monthly is Tue 27 Oct; November's is
+#: Mon 23 Nov, because Tue 24 Nov is Guru Nanak Jayanti.
+#:
+#: A computed "last Tuesday" would be wrong twice in three months here - November and January
+#: both moved - and the shift is earlier, which a calculation never guesses. That is the real
+#: argument for reading the contract's own `expiry` field, and it is stronger than the one this
+#: file first carried: the first version of these tests used 29 Oct and 26 Nov, neither of
+#: which is an expiry date at all.
+OCT = dt.date(2026, 10, 27)
+NOV = dt.date(2026, 11, 23)
 
 ONE = Decimal("1.00000000")
 
@@ -75,8 +81,8 @@ def verdict(yesterday_positions, today_positions, day: dt.date, *expiries: dt.da
 
 def test_1_nothing_held_after_expiry_is_permitted_and_does_not_crash():
     """The case that crashed before the rule existed: a lookup for an expired contract."""
-    yesterday = dt.date(2026, 10, 29)        # October's expiry day
-    today = dt.date(2026, 10, 30)
+    yesterday = dt.date(2026, 10, 27)        # October's expiry day
+    today = dt.date(2026, 10, 28)
     held = [fut(yesterday, OCT, 1)]
 
     permitted, baseline, now = verdict(held, [], today, OCT, NOV)
@@ -91,8 +97,8 @@ def test_2_a_roll_on_expiry_day_is_permitted():
     Closing October and opening the same size in November leaves today's delta equal to the
     baseline, so the band permits it. Rolling before or on expiry preserves delta.
     """
-    yesterday = dt.date(2026, 10, 28)
-    today = dt.date(2026, 10, 29)            # October's expiry day
+    yesterday = dt.date(2026, 10, 26)
+    today = dt.date(2026, 10, 27)            # October's expiry day
     held = [fut(yesterday, OCT, 1)]
     rolled = [fut(today, NOV, 1)]
 
@@ -108,8 +114,8 @@ def test_3_a_roll_the_day_after_expiry_is_a_breach():
     October expired yesterday, so the baseline is zero. Opening November today is a position
     created from nothing - and a banned scrip admits no fresh positions.
     """
-    yesterday = dt.date(2026, 10, 29)
-    today = dt.date(2026, 10, 30)
+    yesterday = dt.date(2026, 10, 27)
+    today = dt.date(2026, 10, 28)
     held = [fut(yesterday, OCT, 1)]
     reopened = [fut(today, NOV, 1)]
 
@@ -120,8 +126,8 @@ def test_3_a_roll_the_day_after_expiry_is_a_breach():
 
 
 def test_4_an_unchanged_second_contract_survives_the_first_expiring():
-    yesterday = dt.date(2026, 10, 29)
-    today = dt.date(2026, 10, 30)
+    yesterday = dt.date(2026, 10, 27)
+    today = dt.date(2026, 10, 28)
     held = [fut(yesterday, OCT, 1), fut(yesterday, NOV, 1)]
     kept = [fut(today, NOV, 1)]
 
@@ -132,8 +138,8 @@ def test_4_an_unchanged_second_contract_survives_the_first_expiring():
 
 
 def test_5_adding_to_the_surviving_contract_is_a_breach():
-    yesterday = dt.date(2026, 10, 29)
-    today = dt.date(2026, 10, 30)
+    yesterday = dt.date(2026, 10, 27)
+    today = dt.date(2026, 10, 28)
     held = [fut(yesterday, OCT, 1), fut(yesterday, NOV, 1)]
     added = [fut(today, NOV, 2)]
 
@@ -145,8 +151,8 @@ def test_5_adding_to_the_surviving_contract_is_a_breach():
 
 def test_6_a_short_reopened_after_expiry_is_a_breach():
     """The band is about delta moving away from zero in either direction, not about sign."""
-    yesterday = dt.date(2026, 10, 29)
-    today = dt.date(2026, 10, 30)
+    yesterday = dt.date(2026, 10, 27)
+    today = dt.date(2026, 10, 28)
     held = [fut(yesterday, OCT, -1)]
     reopened = [fut(today, NOV, -1)]
 
@@ -158,7 +164,7 @@ def test_6_a_short_reopened_after_expiry_is_a_breach():
 
 def test_7_a_contract_expiring_today_is_valued_not_zeroed():
     today = OCT
-    held = [fut(dt.date(2026, 10, 28), OCT, 1)]
+    held = [fut(dt.date(2026, 10, 26), OCT, 1)]
     assert live_on(held, today) == tuple(held)
     assert futeq_delta(live_on(held, today), factors(today, OCT), SYMBOL) == Decimal(LOT)
 
@@ -186,8 +192,8 @@ def test_expiry_alone_can_never_cause_a_breach(holdings):
     yesterday's factor instead would leave today short of the baseline on a long book and over
     it on a short one, and the expiry would read as the holder's doing.
     """
-    yesterday = dt.date(2026, 10, 29)
-    today = dt.date(2026, 10, 30)
+    yesterday = dt.date(2026, 10, 27)
+    today = dt.date(2026, 10, 28)
     held = [fut(yesterday, e, q) for e, q in holdings]
     survivors = [fut(today, e, q) for e, q in holdings if e >= today]
 
@@ -198,8 +204,8 @@ def test_expiry_alone_can_never_cause_a_breach(holdings):
 
 def test_an_entirely_expired_book_permits_nothing_new():
     """Which is correct for a banned scrip: no fresh positions."""
-    yesterday = dt.date(2026, 10, 29)
-    today = dt.date(2026, 10, 30)
+    yesterday = dt.date(2026, 10, 27)
+    today = dt.date(2026, 10, 28)
     held = [fut(yesterday, OCT, 5)]
 
     assert live_on(held, today) == ()
@@ -211,18 +217,19 @@ def test_an_entirely_expired_book_permits_nothing_new():
 
 
 def test_live_on_is_strict_about_the_expiry_day():
-    held = [fut(dt.date(2026, 10, 28), OCT, 1)]
+    held = [fut(dt.date(2026, 10, 26), OCT, 1)]
     assert len(live_on(held, OCT)) == 1                        # live on its expiry day
-    assert live_on(held, dt.date(2026, 10, 30)) == ()          # gone the next
+    assert live_on(held, dt.date(2026, 10, 28)) == ()          # gone the next
 
 
 def test_live_on_uses_the_contract_field_not_a_computed_last_thursday():
-    """November 2026's last Thursday is the 26th because the 24th is a holiday. A rule that
-    computed the date would have to know that; reading the field does not."""
-    held = [fut(dt.date(2026, 11, 23), NOV, 1)]
-    assert NOV.weekday() == 3
-    assert len(live_on(held, dt.date(2026, 11, 25))) == 1
-    assert live_on(held, dt.date(2026, 11, 27)) == ()
+    """November's monthly expiry is Monday the 23rd, because Tuesday the 24th is Guru Nanak
+    Jayanti and NSE moves the expiry earlier. A rule computing "last Tuesday" would land on the
+    24th and be wrong; reading the contract's field cannot be."""
+    held = [fut(dt.date(2026, 11, 19), NOV, 1)]
+    assert NOV.weekday() == 0                 # Monday, moved earlier off the holiday
+    assert len(live_on(held, dt.date(2026, 11, 23))) == 1
+    assert live_on(held, dt.date(2026, 11, 25)) == ()
 
 
 def test_a_weekend_needs_no_special_handling():
@@ -231,6 +238,6 @@ def test_a_weekend_needs_no_special_handling():
     decides whether the contract still counts."""
     friday = dt.date(2026, 10, 30)
     monday = dt.date(2026, 11, 2)
-    held = [fut(dt.date(2026, 10, 29), friday, 1)]
+    held = [fut(dt.date(2026, 10, 28), friday, 1)]
     assert len(live_on(held, friday)) == 1
     assert live_on(held, monday) == ()

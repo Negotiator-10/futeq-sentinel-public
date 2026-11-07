@@ -761,25 +761,48 @@ the calendar comes from, and that turned out to matter more than the store itsel
   including ones where the expiry makes the net delta *rise* - which is precisely the case FAQ
   14 is answering.
 
-- **OPEN: the expiry day itself, and the two readings disagree.** FAQ 14 scopes its relief to
-  "on expiry day", and my rule triggers the day **after** expiry. Which threshold is right
-  depends on a fact about NSE's end-of-day position, not about the circular: **does an expiring
-  contract still carry open interest at its own expiry-day close?**
+- **7. RESOLVED, 8 Nov: `expiry < today` is right, and the expiry day itself is confirmed.**
 
-  * If it does, the EoD position on expiry day still holds it, `expiry < today` is right, and
-    rolling on expiry day is permitted - case 2 above.
-  * If it does not, the EoD position already excludes it while yesterday's included it, so the
-    baseline must zero it on the expiry day itself (`expiry <= today`), and rolling on expiry
-    day becomes a breach.
+  FAQ 14 scopes its relief to "on expiry day" while this rule triggers the day after, so the
+  threshold turned on a fact about NSE's end-of-day position rather than about the circular:
+  does an expiring contract still carry open interest at its own expiry-day close? If not, the
+  EoD position on expiry day would already exclude it while yesterday's included it, the
+  baseline would have to zero it a day earlier (`expiry <= today`), and rolling on expiry day
+  would become a breach instead of being permitted.
 
-  Confirmed for the day after, from two files: no contract expiring on or before 29 Oct 2026
-  appears in either `Contract_Delta_30102026.csv` or the 30 Oct bhavcopy, so an expired
-  contract is gone from NSE's data the next day. The expiry day itself is unresolved, and one
-  download settles it - `BhavCopy_NSE_FO_..._20261029`, the October expiry day. If the expiring
-  contracts show open interest at that close, `expiry < today` stands.
+  It does. From `BhavCopy_NSE_FO_..._20261027`, the October monthly expiry:
 
-  The rule is implemented as `expiry < today` because that is the case that was crashing and the
-  common one. The expiry-day verdict rests on reasoning until that file is in the repo.
+      contracts expiring 27 Oct, in the 27 Oct file : 16,961
+      of which open interest > 0                    : 13,590
+      total open interest across them               : 7,304,736,812
+
+  So the expiring contract is in the end-of-day position on its own expiry day, the strict
+  `expiry < today` is correct, and case 5's roll on expiry day is permitted. Confirmed for the
+  day after as well: nothing expiring on or before 27 Oct appears in the 29 or 30 Oct bhavcopy,
+  or in `Contract_Delta_30102026.csv`.
+
+- **8. The expiry calendar is not what either of us assumed.** Claude first sent me to the
+  29 Oct bhavcopy on the assumption of a last-Thursday expiry - the twenty-year Indian
+  convention, and no longer true, because SEBI moved expiry days in 2025. That file contains
+  **no contract expiring that day**, so it answered nothing.
+
+  The real pattern, read out of the files rather than assumed: **expiry is Tuesday, and moves
+  EARLIER to the Monday when that Tuesday is a holiday.**
+
+      2026-11-23  Monday     because Tue 24 Nov is Guru Nanak Jayanti
+      2026-12-29  Tuesday    Wed 30 Dec is a trading day, so no move
+      2027-01-25  Monday     because Tue 26 Jan is Republic Day
+
+  Two of three monthlies moved. A computed "last Tuesday" would be wrong twice in three months,
+  and wrong in the direction a calculation never guesses, because the shift is earlier rather
+  than later. **That is the real argument for decision 4** - read the contract's own `expiry`
+  field - and it is a good deal stronger than the one first recorded here, which rested on my
+  own slip in a worked example.
+
+  Consequence for the fixtures: `tests/test_expiry.py` and the Table 2 fixture were built on
+  29 Oct and 26 Nov, neither of which is an expiry date at all. Corrected to 27 Oct and 23 Nov,
+  which are. The arithmetic and the verdicts never depended on it, the positions being
+  synthetic, but a fixture that implies it is realistic should use dates that exist.
 
 - **Decision:** a contract expired before today contributes zero to the ban-period baseline;
   one expiring today or later is valued at today's factor. Filtered in the caller, not in the
@@ -801,5 +824,9 @@ the calendar comes from, and that turned out to matter more than the store itsel
   property; and computing the expiry date rather than reading it, which my own November example
   showed to be wrong.
 
-- **Outcome:** accepted, 7 Nov 2026, with the expiry-day scope open pending one bhavcopy.
-  `check_ban_period_reduction()` is still unwritten; this is the rule it will apply.
+- **Outcome:** accepted 7 Nov 2026 and closed 8 Nov, the expiry-day scope settled by the
+  27 Oct bhavcopy. `check_ban_period_reduction()` is still unwritten; this is the rule it
+  will apply. One thing left open and logged in `docs/doubts.md`:
+  `Contract_Delta_30102026.csv` lists Thursday expiries - 5, 12, 19 and 26 Nov, 14,076
+  contracts on the 26th - that neither the 29 nor the 30 Oct bhavcopy contains. Two NSE
+  files a day apart disagreeing about the contract universe, with no explanation yet.

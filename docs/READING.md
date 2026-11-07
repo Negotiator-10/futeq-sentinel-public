@@ -206,6 +206,8 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `combineoi_15102026.zip` | 21,713 | `b358fb195fe7ce652bd59d31809aa3476005829ac7cdfb8e92b2c7b231a34518` |
 | `combineoi_29102026.zip` | 22,193 | `cd9ef267176a03a6de0e8a51791f8bc6706f0f5a050add4394434633b2e2b31b` |
 | `combineoi_02112026.zip` | 22,219 | `853823d6981505551cda3f57b3d5c59e27ed69678732f2fd58df7ff569f79889` |
+| `BhavCopy_NSE_FO_0_0_0_20261027_F_0000.csv.zip` | 1,366,893 | `c086dbd47763ef7399dcb1b8dedb5c2396a04f36949fded8f42e641f0919d316` |
+| `BhavCopy_NSE_FO_0_0_0_20261029_F_0000.csv.zip` | 1,030,948 | `cb2dc239fad84efa1977c4925b3f0c4882fc8e94426dc94e9bb73cc608de7054` |
 
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
@@ -372,6 +374,39 @@ Two properties make the load safe to repeat, which is what `PLAN.md` D5 means by
 * loading a *different* file for a day already stored is a **conflict**, raised with both
   values and the scrips named. An input that changed under us is a finding rather than
   something to overwrite, and the `input_sha256` on every row is what makes it detectable.
+
+## NSE's expiry calendar is Tuesday, moved earlier for holidays
+
+Read out of the bhavcopies on 8 Nov 2026, after an assumption of last-Thursday expiry sent one
+download to the wrong date. SEBI moved expiry days in 2025, so the long-standing convention no
+longer holds.
+
+| Monthly expiry | Day | Why |
+|---|---|---|
+| 27 Oct 2026 | Tuesday | the normal day |
+| 23 Nov 2026 | **Monday** | Tue 24 Nov is Guru Nanak Jayanti |
+| 29 Dec 2026 | Tuesday | Wed 30 Dec is a trading day, so no move |
+| 25 Jan 2027 | **Monday** | Tue 26 Jan is Republic Day |
+
+The shift is **earlier**, not later. Two of three monthlies in the sample moved, so a computed
+"last Tuesday" would be wrong twice in three months, and wrong in the direction a calculation
+does not guess. That is why `DECISIONS.md` #014 reads each contract's own `expiry` field.
+
+`BhavCopy_NSE_FO_..._20261029` is kept even though it answered nothing, because the fact that it
+contains **no contract expiring 29 Oct** is what disproved the assumption.
+
+### An expiring contract is in the end-of-day position on its own expiry day
+
+From the 27 Oct file, the October monthly expiry:
+
+    contracts expiring 27 Oct, in the 27 Oct file : 16,961
+    of which open interest > 0                    : 13,590
+    total open interest across them               : 7,304,736,812
+
+That settles the baseline threshold at a strict `expiry < today` rather than `expiry <= today`,
+and therefore that rolling on expiry day is permitted - see #014 decision 7. By the next day the
+contracts are gone: nothing expiring on or before 27 Oct appears in the 29 or 30 Oct bhavcopy,
+or in `Contract_Delta_30102026.csv`.
 
 ## The trading calendar, and the clearing list that is not the same thing
 

@@ -38,7 +38,7 @@ from sentinel.book import (
 FIXTURES = Path(__file__).parent / "fixtures" / "book"
 ISIN = "INE114A01011"
 SYMBOL = {ISIN: "SAIL"}
-EXPIRY = dt.date(2026, 10, 29)
+EXPIRY = dt.date(2026, 10, 27)
 DAY = dt.date(2026, 10, 12)
 
 
