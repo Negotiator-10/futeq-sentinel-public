@@ -830,3 +830,74 @@ the calendar comes from, and that turned out to matter more than the store itsel
   `Contract_Delta_30102026.csv` lists Thursday expiries - 5, 12, 19 and 26 Nov, 14,076
   contracts on the 26th - that neither the 29 nor the 30 Oct bhavcopy contains. Two NSE
   files a day apart disagreeing about the contract universe, with no explanation yet.
+
+## #015: A flat day is a marker row, never an absence, 8 Nov 2026
+<!-- Authorship. The marker-row design, the reasoning for trusting the file over the filename
+     or the caller, and all four refusals are mine. Claude found the failure by running my
+     first draft of check_ban_period_reduction() against a missing file, walked the shape of
+     the fix, and built PropBook.flat() and the loader support. -->
+
+- **The failure.** My first `check_ban_period_reduction()` took `today: PropBook | None` and
+  `yesterday: PropBook | None`, with `None` meaning "verified, nothing held". The natural way to
+  fetch a book is `books.get(day)`, which also returns `None` when the file never arrived. Run
+  against the real day-5 breach with today's file missing:
+
+      permitted=True  baseline=250  today=0  reason='held or reduced toward zero'
+
+  The breach vanished: every holder looked as though they had closed out. A missing yesterday
+  failed the other way, flagging an unchanged book as a fresh position. The docstring said
+  "the caller must never pass None for a missing file", which was a type that could not say
+  "unknown", guarded by prose - the same shape as `was_in_ban_yesterday: bool` in #011.
+
+- **Three conditions, three representations.**
+
+      positions were held          PropBook([...])
+      verified: nothing was held   PropBook.flat(trade_date)
+      the file never arrived       no PropBook at all
+
+  `PropBook([])` still refuses, because an empty list is what a missing file produces by
+  accident. A flat book can only be built by saying so, with a date; the constructor's name is
+  the assertion. With non-optional parameters the caller's lookup becomes `books[day]`, and a
+  missing day raises `KeyError` - the dictionary access is the guard and nobody has to remember
+  anything.
+
+- **Where the flat day comes from: a marker row in the file itself.**
+
+      2026-10-30,,,FLAT,,,,
+
+  Not the filename, because filenames get renamed and copied - `combineoi_13102026 (1).zip`
+  broke the parser that way. Not a date the caller states, because then nothing in the file can
+  contradict a wrong date. A marker row makes the file describe itself, the same way the ban list
+  carries its date in its own heading and the transition diff trusted that heading over the
+  filename. And a FLAT row can only be written on purpose, where an empty or missing file can
+  happen by accident.
+
+- **The four refusals.** A FLAT row beside position rows for the same date - the file
+  contradicts itself, so neither statement can be trusted. A second FLAT row for one date. A
+  FLAT row with any field other than the date filled - overloading the `instrument` column is
+  safe only because of this, since it stops a half-written position row carrying FLAT in the
+  wrong column from passing as "nothing was held". And a file with a header and no rows, which
+  is what a truncated write looks like.
+
+- **What it fixes beyond the missing file.** Every book now carries a date, including a flat
+  one, so the check can always verify `calendar.previous_trading_day(today) ==
+  yesterday.trade_date`. Under `None` that comparison was impossible on exactly the days it
+  mattered. The calendar also brings the Muhurat refusal with it: `previous_trading_day()`
+  raises through 8 Nov 2026 until the chaining is verified (#013), so the prop book fails closed
+  there without any code of its own.
+
+  That check closes a second hole found in the same review: my draft compared 21 Oct against a
+  14 Oct book without objecting, which is `score_bans.py`'s "next file on disk" bug moved into
+  the prop book.
+
+- **Decision:** a verified flat day is `PropBook.flat(date)`, loaded only from a FLAT marker row
+  whose other fields are blank. `check_ban_period_reduction()` takes non-optional books and the
+  trading calendar, and verifies yesterday is the previous trading day.
+
+- **Alternatives rejected:** `None` for flat, which is the failure; the filename as the date
+  source; a caller-stated date; a separate `FlatDay` type, which would make every consumer
+  handle two types where one empty book iterates as nothing.
+
+- **Outcome:** accepted, 8 Nov 2026. `PropBook.flat()` and the loader support are in, with 15
+  tests. The signature change and both date checks belong to `check_ban_period_reduction()`,
+  which is not yet in the repo.

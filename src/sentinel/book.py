@@ -172,12 +172,45 @@ class Position:
 
 
 class PropBook:
-    """One day's positions, validated, with no two records for the same contract and UCC."""
+    """One day's positions, validated, with no two records for the same contract and UCC.
+
+    A day can be in three conditions, and they must stay distinguishable:
+
+        positions were held          PropBook([...])
+        verified: nothing was held   PropBook.flat(trade_date)
+        the file never arrived       no PropBook at all - the caller's lookup fails
+
+    The last two used to share a representation (`None`), and once two facts share a value
+    nothing downstream can separate them again: a missing today-file read as every holder
+    having closed out, which hid a real breach. So `PropBook([])` still refuses - an empty list
+    is what a missing file produces by accident - and a flat day can only be built by saying so,
+    with a date. The constructor's name is the assertion. See `DECISIONS.md` #015.
+    """
+
+    @classmethod
+    def flat(cls, trade_date: dt.date) -> PropBook:
+        """A day on which it is VERIFIED that nothing was held.
+
+        Carries its date so a flat yesterday can still be checked against the trading calendar -
+        under a `None` representation that check was impossible on exactly the days it mattered.
+        Built by `load_books()` from an explicit FLAT marker row, never from an absence.
+        """
+        book = cls.__new__(cls)
+        book.positions = ()
+        book.trade_date = trade_date
+        return book
+
+    @property
+    def is_flat(self) -> bool:
+        return not self.positions
 
     def __init__(self, positions: Iterable[Position]) -> None:
         rows = tuple(positions)
         if not rows:
-            raise BookError("an empty book is not a day's positions; it is a missing file")
+            raise BookError(
+                "an empty book is not a day's positions; it is what a missing file looks like. "
+                "A day on which nothing was held is PropBook.flat(trade_date)."
+            )
 
         dates = {p.trade_date for p in rows}
         if len(dates) > 1:
@@ -419,18 +452,76 @@ def load_books(path: str | Path) -> dict[dt.date, PropBook]:
     `parse_mwpl_file()`.
     """
     by_date: dict[dt.date, list[Position]] = {}
+    flat_dates: dict[dt.date, int] = {}
     with Path(path).open(encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
         _require_columns(reader, _POSITION_COLUMNS, path)
         for lineno, rec in enumerate(reader, start=2):
             if _is_blank_row(rec):
                 continue
+            if (rec.get("instrument") or "").strip().upper() == _FLAT_MARKER:
+                day = _parse_flat_row(rec, path, lineno)
+                if day in flat_dates:
+                    raise BookError(
+                        f"{path} line {lineno}: a second FLAT row for {day} (the first is on line "
+                        f"{flat_dates[day]}). One marker per day; two means the file was "
+                        f"assembled carelessly, and that is worth a person's attention."
+                    )
+                flat_dates[day] = lineno
+                continue
             position = _parse_position(rec, path, lineno)
             by_date.setdefault(position.trade_date, []).append(position)
 
-    if not by_date:
-        raise BookError(f"{path}: no positions")
-    return {day: PropBook(rows) for day, rows in sorted(by_date.items())}
+    both = sorted(set(flat_dates) & set(by_date))
+    if both:
+        day = both[0]
+        raise BookError(
+            f"{path} line {flat_dates[day]}: {day} is marked FLAT and also has "
+            f"{len(by_date[day])} position row(s). The file contradicts itself about that day, "
+            f"so neither statement can be trusted."
+        )
+
+    if not by_date and not flat_dates:
+        raise BookError(
+            f"{path}: a header and no rows. That is what a truncated or failed write looks like, "
+            f"so it is refused rather than read as a flat day. A day on which nothing was held "
+            f"is written as one FLAT marker row: '<date>,,,FLAT,,,,'."
+        )
+
+    books = {day: PropBook(rows) for day, rows in by_date.items()}
+    books.update({day: PropBook.flat(day) for day in flat_dates})
+    return dict(sorted(books.items()))
+
+
+#: The `instrument` value that marks a verified flat day. The marker is the COMBINATION of this
+#: value and every other field except the date being blank - see `_parse_flat_row()`.
+_FLAT_MARKER = "FLAT"
+
+
+def _parse_flat_row(rec: Mapping[str, str], path: str | Path, lineno: int) -> dt.date:
+    """A FLAT marker row: a date, the word FLAT, and nothing else.
+
+    Overloading the `instrument` column is safe only because every other field must be blank.
+    That refusal is what stops a half-written position row - one that happens to carry FLAT in
+    the wrong column - from passing as an assertion that nothing was held.
+    """
+    filled = sorted(
+        k for k, v in rec.items()
+        if k not in ("trade_date", "instrument") and (v or "").strip()
+    )
+    if filled:
+        raise BookError(
+            f"{path} line {lineno}: a FLAT row must carry only a date, but {', '.join(filled)} "
+            f"{'is' if len(filled) == 1 else 'are'} filled. A marker that also looks like a "
+            f"position is neither."
+        )
+    try:
+        return dt.date.fromisoformat((rec.get("trade_date") or "").strip())
+    except ValueError as exc:
+        raise BookError(
+            f"{path} line {lineno}: a FLAT row's date {rec.get('trade_date')!r} is not "
+            f"YYYY-MM-DD. The marker exists to state the date, so it has to be readable."
+        ) from exc
 
 
 def load_book(path: str | Path) -> PropBook:
