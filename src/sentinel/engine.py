@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from sentinel.book import Position
 from sentinel.parsers import MwplRow
 from sentinel.rules import Rules
 
@@ -26,6 +27,8 @@ __all__ = [
     "BarredCheck",
     "Reconciliation",
     "reconcile",
+    "check_ban_period_reduction",
+    "check_entity_limit",
 ]
 
 
@@ -229,3 +232,91 @@ def reconcile(rows: tuple[MwplRow, ...], rules: Rules) -> Reconciliation:
         barred=tuple(barred),
         failures=tuple(failures),
     )
+
+
+# ===========================================================================
+# YOURS TO WRITE. Two limit checks, and everything they rest on is settled.
+#
+# SPEC.md row 6 and row 7. The plumbing is in `sentinel.book`: Position with its invariants,
+# PropBook for one day, DeltaFactors for NSE's published per-contract factors, and
+# futeq_delta() which turns holdings plus factors into a FutEq delta in shares.
+#
+# WHAT IS ALREADY DECIDED, so you do not have to re-derive it:
+#
+#   * FutEq OI is in SHARES, not rupees. Para 5.1.1 defines delta as a multiple of the notional
+#     position, Table 1 shows 300 long futures as FutEq OI 300, and the headroom reconciliation
+#     matches NSE's column on 216 of 216 rows - impossible if one side were rupees.
+#
+#   * No prices are needed. NSE's Contract_Delta factors are per unit with the pricing done:
+#     exactly 1.0 for futures, [0, 1] for calls, [-1, 0] for puts. A signed quantity_lots gives
+#     the right sign for short positions without special-casing.
+#
+#   * The decomposition, decided 7 Nov. Each day's delta change splits into
+#         passive = baseline - yesterday's actual delta
+#         active  = today's actual delta - baseline
+#     where  baseline = futeq_delta(YESTERDAY's positions, TODAY's factors).
+#     Only the active part can breach. This needs two consecutive days of per-contract holdings
+#     and nothing else - NOT trade fills, which was the earlier recorded finding and was
+#     stronger than the rule requires.
+#
+#   * The permitted band, from para 5.3.2 and Table 2:
+#         permitted if  delta_today * baseline >= 0  and  |delta_today| <= |baseline|
+#     Worked against all six cases in the circular. Note what falls out of it: a baseline of
+#     zero forces delta_today to zero, so "No Fresh Positions" is a CONSEQUENCE of this one
+#     expression rather than a separate rule.
+#
+#   * Zero is inclusive. 5.3.2 says delta "could be reduced till 0"; Table 2 day 4 says "above
+#     0". Closing out completely cannot sensibly be a breach, so the floor is >= 0. The wording
+#     difference is recorded next to the threshold in config/rules.yaml.
+#
+# WHAT YOU STILL DECIDE:
+#
+#   1. The signature. Row 6's check needs yesterday's positions, today's positions, today's
+#      factors, the ISIN-to-symbol map and `rules`. Which of those are positional, which are
+#      keyword-only, and in what order - you made that call well on is_in_ban().
+#
+#   2. What it returns. A bool loses the reason, and a desk needs to be told which scrip, which
+#      direction, and by how much. You chose the shape of Reconciliation yourself and it was
+#      better than the scaffold I gave you; do the same here.
+#
+#   3. Expiry and rolls. A contract expiring is not a trade; rolling into the next month closes
+#      one position and opens another. Your passive/active split already implies an answer -
+#      check whether it is the one you want, and whether para 5.3.2 cares about the act or
+#      about the resulting delta.
+#
+#   4. The unit of the check. Row 6 says "entities", and 5.1.2 nets within a UCC then
+#      gross-adds across UCCs. Is the ban-period test per UCC, or per entity above it? The
+#      answer decides whether one client can offset another's position.
+#
+# The fixture is SEBI's own Table 2, in tests/fixtures/book/, with a seventh day that shows the
+# genuine passive increase the circular's day 2 reaches for and cannot produce:
+#
+#   day  date        holdings             FutEq delta  baseline   expected
+#    1   2026-10-12  +1 FUT                    1000.0      n/a    (entry day)
+#    2   2026-10-13  +1 FUT                    1000.0   1000.0    permitted
+#    3   2026-10-14  +1 FUT +1 PE               600.0   1000.0    permitted
+#    4   2026-10-15  +1 FUT +1 PE -1 CE         250.0    600.0    permitted
+#    5   2026-10-16  +2 FUT +1 PE -1 CE        1250.0    250.0    BREACH
+#    6   2026-10-19  +2 FUT +1 PE -1 CE        1250.0   1250.0    permitted
+#    7   2026-10-21  +2 FUT +1 PE -1 CE        1450.0   1450.0    permitted, rose 200 passively
+#
+# Row 7 is the simpler of the two and the percentages are already in config/rules.yaml under
+# single_stock.entity_limits. Its sting is in the fifth category: FPI Category II splits at 10%
+# or 20% depending on whether the holder is an individual, family office or corporate, so
+# collapsing Cat II to one number is the likely bug - which is why SPEC row 7 names a test for
+# exactly that.
+# ===========================================================================
+
+
+def check_ban_period_reduction(*args, **kwargs):
+    """Whether a day's trading reduced FutEq OI as para 5.3.2 requires. Signature yours."""
+    raise NotImplementedError("mine to write")
+
+
+def check_entity_limit(category: str, futeq_oi: float, mwpl: int, rules: Rules):
+    """Whether an entity's FutEq OI is inside its category's share of MWPL (SPEC row 7).
+
+    The signature is the one SPEC row 7 names, with `rules` added because the percentages come
+    from config/rules.yaml and not from a literal here. The return type is yours.
+    """
+    raise NotImplementedError("mine to write")
