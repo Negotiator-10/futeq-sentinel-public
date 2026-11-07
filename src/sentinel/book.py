@@ -237,9 +237,23 @@ class DeltaFactors:
     constraint deciding an interface for the third time.
     """
 
-    def __init__(self, trade_date: dt.date, factors: Mapping[tuple, float]) -> None:
+    def __init__(self, trade_date: dt.date, factors: Mapping[tuple, Decimal]) -> None:
+        # A float factor is refused rather than converted, because converting is the bug.
+        # Decimal(0.35) is 0.34999999999999997779553950749686919152736663818359375, so
+        # accepting a float here would reintroduce exactly the inexactness Decimal is used to
+        # avoid - while looking like it had been fixed. A str or an int is converted, since
+        # both are exact.
+        clean: dict[tuple, Decimal] = {}
+        for key, value in factors.items():
+            if isinstance(value, float):
+                raise BookError(
+                    f"delta factor for {key[0]} is a float ({value!r}). Pass a Decimal or the "
+                    f"string NSE published - Decimal(float) carries the float's binary error, "
+                    f"so converting here would hide it rather than fix it."
+                )
+            clean[key] = value if isinstance(value, Decimal) else Decimal(value)
         self.trade_date = trade_date
-        self._factors = dict(factors)
+        self._factors = clean
 
     def __len__(self) -> int:
         return len(self._factors)
@@ -248,7 +262,7 @@ class DeltaFactors:
         return f"<DeltaFactors {self.trade_date} {len(self._factors)} contract(s)>"
 
     def factor(self, symbol: str, instrument: Instrument, expiry: dt.date,
-               strike: Decimal | None) -> float:
+               strike: Decimal | None) -> Decimal:
         """The delta factor per unit for one contract. Refuses rather than defaulting to 1.
 
         A missing contract is not a futures row and not a zero. It means the position is in
@@ -266,18 +280,48 @@ class DeltaFactors:
             ) from None
 
 
+def live_on(positions: Iterable[Position], day: dt.date) -> tuple[Position, ...]:
+    """The positions whose contract has not expired before `day`.
+
+    Selection only - it decides nothing about limits. It exists because the ban-period baseline
+    revalues **yesterday's** holdings at **today's** factors, and NSE publishes no factor for a
+    contract that has already expired, so a lookup for one refuses. Expiry is the single case
+    where a missing factor is expected rather than a finding, which is why it is filtered here
+    instead of by weakening `DeltaFactors.factor()`.
+
+    `expiry < day` is strict: on its expiry day a contract is still live and NSE still publishes
+    its factor. The comparison uses the contract's own `expiry` field rather than a computed
+    "last Thursday", because NSE moves an expiry earlier when it would fall on a holiday - as
+    November 2026 shows, where the 24th is Guru Nanak Jayanti.
+
+    The rule this serves is recorded in `DECISIONS.md`: an expired contract contributes zero to
+    the baseline, because its delta disappeared without the holder doing anything. Indian stock
+    derivatives are physically settled, so at expiry the position stops being an F&O position
+    and becomes a delivery obligation in the cash market; either way its F&O delta is gone.
+    """
+    return tuple(p for p in positions if p.expiry >= day)
+
+
 def futeq_delta(
     positions: Iterable[Position],
     factors: DeltaFactors,
     symbol_for_isin: Mapping[str, str],
-) -> float:
+) -> Decimal:
     """FutEq delta in **shares** for a set of positions, netted as 5.1.1 defines it.
 
     `sum( delta_factor x quantity_lots x lot_size )`. Netting happens naturally because
     `quantity_lots` is signed; 5.1.2's gross addition across UCCs is the caller's job, since
     whether to net or gross-add depends on which limit is being checked.
     """
-    total = 0.0
+    # Decimal, not float. When nothing was traded, a day's delta and the same holdings
+    # revalued must come out EXACTLY equal, because the ban-period band compares them with
+    # <=. Two float sums over the same values in a different order can differ by about 1e-12,
+    # and that difference reads as an entity having created delta it never created. NSE writes
+    # its factors as short decimal strings, so Decimal holds them exactly.
+    #
+    # This is not the opposite of the reconciliation decision, where float was right: there the
+    # residual is never near zero, so nothing rested on exact equality. Here everything does.
+    total = Decimal(0)
     for p in positions:
         try:
             symbol = symbol_for_isin[p.isin]
@@ -292,155 +336,197 @@ def futeq_delta(
 
 
 # -- loading ------------------------------------------------------------------------------
+#
+# Every reader here follows the rule stated in `parsers.py`: **skip what carries no
+# information, refuse what carries information you cannot read.** A row with every field blank
+# is trailing whitespace in a CSV and carries nothing. A row with a quantity and no ISIN is a
+# real position whose key is missing, and dropping it would understate that UCC's delta - which
+# is the direction that hides a breach rather than inventing one.
+#
+# All four loaders went out skipping on one blank field instead, which is why the check is a
+# named function used by all of them rather than a condition written four times.
 
 
-def load_book(path: str | Path) -> PropBook:
-    """Read a day's synthetic positions from CSV.
+def _is_blank_row(rec: Mapping[str, str | None]) -> bool:
+    """True only when every field is empty. Anything else has to parse or fail."""
+    return all(not (value or "").strip() for value in rec.values())
+
+
+def _require_columns(reader: csv.DictReader, expected: set[str], path: str | Path) -> None:
+    """A renamed column means the format changed - see the 7 Dec 2026 cutover in READING.md."""
+    missing = expected - set(reader.fieldnames or [])
+    if missing:
+        raise BookError(f"{path}: missing column(s) {sorted(missing)}")
+
+
+def _parse_strike(text: str, instrument: Instrument) -> Decimal | None:
+    """Turn the strike column into a value, deciding by instrument rather than by spelling.
+
+    NSE writes a futures row with a strike of 0, which can arrive as `0`, `0.00` or blank. The
+    earlier version special-cased the literal string `"0"`, so `0.00` on a futures row raised
+    "a future has no strike" and `0` on an option raised "an option needs a strike" rather than
+    the accurate complaint. Parsing first and deciding by instrument fixes both.
+
+    An option carrying a genuine zero is passed through, so `Position.__post_init__` can say the
+    useful thing: a zero strike is how NSE writes futures, so the row is probably mis-parsed.
+    """
+    text = text.strip()
+    if text == "":
+        return None
+    value = Decimal(text)
+    if value == 0 and instrument is Instrument.FUT:
+        return None
+    return value
+
+
+_POSITION_COLUMNS = {
+    "trade_date", "ucc", "isin", "instrument", "expiry", "strike", "lot_size", "quantity_lots",
+}
+
+
+def _parse_position(rec: Mapping[str, str], path: str | Path, lineno: int) -> Position:
+    """One row to one Position. The single place a position row is understood.
+
+    `load_book()` and `load_books()` both go through here, because two copies of this is how
+    one of them gets fixed and the other does not.
+    """
+    try:
+        instrument = Instrument.from_nse(rec["instrument"])
+        return Position(
+            trade_date=dt.date.fromisoformat(rec["trade_date"].strip()),
+            ucc=rec["ucc"].strip(),
+            isin=rec["isin"].strip(),
+            instrument=instrument,
+            expiry=dt.date.fromisoformat(rec["expiry"].strip()),
+            strike=_parse_strike(rec["strike"], instrument),
+            lot_size=int(rec["lot_size"]),
+            quantity_lots=int(rec["quantity_lots"]),
+        )
+    except BookError as exc:
+        raise BookError(f"{path} line {lineno}: {exc}") from exc
+    except (ValueError, KeyError, ArithmeticError) as exc:
+        raise BookError(f"{path} line {lineno}: {exc}") from exc
+
+
+def load_books(path: str | Path) -> dict[dt.date, PropBook]:
+    """Read a positions CSV into one `PropBook` per date.
+
+    A `PropBook` is deliberately one day, because the ban-period check compares two of them.
+    This is the reader for a file holding several - a scenario fixture, or a replay.
 
     Read with the `csv` module rather than pandas on purpose: pandas' default missing-value list
     includes the literal string "NA", which once silently disarmed the index guard in
     `parse_mwpl_file()`.
     """
-    rows: list[Position] = []
-    with Path(path).open(encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        expected = {"trade_date", "ucc", "isin", "instrument", "expiry", "strike",
-                    "lot_size", "quantity_lots"}
-        missing = expected - set(reader.fieldnames or [])
-        if missing:
-            raise BookError(f"{path}: missing column(s) {sorted(missing)}")
-
-        for lineno, rec in enumerate(reader, start=2):
-            if not rec["isin"].strip():
-                continue
-            strike_text = rec["strike"].strip()
-            try:
-                rows.append(Position(
-                    trade_date=dt.date.fromisoformat(rec["trade_date"].strip()),
-                    ucc=rec["ucc"].strip(),
-                    isin=rec["isin"].strip(),
-                    instrument=Instrument.from_nse(rec["instrument"]),
-                    expiry=dt.date.fromisoformat(rec["expiry"].strip()),
-                    strike=None if strike_text in ("", "0") else Decimal(strike_text),
-                    lot_size=int(rec["lot_size"]),
-                    quantity_lots=int(rec["quantity_lots"]),
-                ))
-            except BookError as exc:
-                raise BookError(f"{path} line {lineno}: {exc}") from exc
-            except (ValueError, KeyError) as exc:
-                raise BookError(f"{path} line {lineno}: {exc}") from exc
-    return PropBook(rows)
-
-
-def load_books(path: str | Path) -> dict[dt.date, PropBook]:
-    """Read a multi-day positions CSV into one PropBook per date.
-
-    A PropBook is deliberately one day, because the ban-period check compares two of them. This
-    is the loader for a file holding several - a scenario fixture, or a replay.
-    """
     by_date: dict[dt.date, list[Position]] = {}
     with Path(path).open(encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
+        _require_columns(reader, _POSITION_COLUMNS, path)
         for lineno, rec in enumerate(reader, start=2):
-            if not rec.get("isin", "").strip():
+            if _is_blank_row(rec):
                 continue
-            strike_text = rec["strike"].strip()
-            try:
-                pos = Position(
-                    trade_date=dt.date.fromisoformat(rec["trade_date"].strip()),
-                    ucc=rec["ucc"].strip(),
-                    isin=rec["isin"].strip(),
-                    instrument=Instrument.from_nse(rec["instrument"]),
-                    expiry=dt.date.fromisoformat(rec["expiry"].strip()),
-                    strike=None if strike_text in ("", "0") else Decimal(strike_text),
-                    lot_size=int(rec["lot_size"]),
-                    quantity_lots=int(rec["quantity_lots"]),
-                )
-            except (BookError, ValueError, KeyError) as exc:
-                raise BookError(f"{path} line {lineno}: {exc}") from exc
-            by_date.setdefault(pos.trade_date, []).append(pos)
+            position = _parse_position(rec, path, lineno)
+            by_date.setdefault(position.trade_date, []).append(position)
+
     if not by_date:
         raise BookError(f"{path}: no positions")
-    return {d: PropBook(rows) for d, rows in sorted(by_date.items())}
+    return {day: PropBook(rows) for day, rows in sorted(by_date.items())}
+
+
+def load_book(path: str | Path) -> PropBook:
+    """Read a single day's positions. Refuses a file holding more than one date."""
+    books = load_books(path)
+    if len(books) > 1:
+        raise BookError(
+            f"{path}: more than one trade date "
+            f"({', '.join(str(d) for d in sorted(books))}). A PropBook is one day; use "
+            f"load_books() for a file holding several."
+        )
+    return next(iter(books.values()))
+
+
+_DELTA_COLUMNS = {
+    "Date", "Symbol", "Expiry day", "Strike Price", "Option Type", "Delta Factor",
+}
+
+
+def _delta_key_and_factor(
+    rec: Mapping[str, str], path: str | Path, lineno: int
+) -> tuple[dt.date, tuple, Decimal]:
+    """One `Contract_Delta` row to a date, a contract key and a factor.
+
+    The factor is a `Decimal` parsed from NSE's text, not a float. NSE writes short decimal
+    strings - `1.00000000`, `-0.40000000` - so `Decimal` holds them exactly, which matters
+    because the ban-period check compares a day's delta against the same holdings revalued and
+    those two must come out EXACTLY equal when nothing was traded. Two float sums over the same
+    values in a different order can differ by about 1e-12, and that difference reads as an
+    entity having created delta it never created.
+    """
+    symbol = rec["Symbol"].strip().upper()
+    if not symbol:
+        raise BookError(
+            f"{path} line {lineno}: no symbol, but the row carries a delta factor "
+            f"({rec['Delta Factor']!r}). Dropping it would leave a position in that contract "
+            f"with no factor, which refuses later and points at the wrong file."
+        )
+    instrument = Instrument.from_nse(rec["Option Type"])
+    key = (
+        symbol,
+        instrument,
+        _parse_nse_date(rec["Expiry day"], path, lineno),
+        Decimal(rec["Strike Price"].strip() or "0"),
+    )
+    try:
+        factor = Decimal(rec["Delta Factor"].strip())
+    except ArithmeticError as exc:
+        raise BookError(
+            f"{path} line {lineno}: delta factor {rec['Delta Factor']!r} is not a number"
+        ) from exc
+    return _parse_nse_date(rec["Date"], path, lineno), key, factor
 
 
 def load_delta_factors(path: str | Path) -> DeltaFactors:
-    """Read NSE's `Contract_Delta_<ddmmyyyy>.csv`.
+    """Read NSE's `Contract_Delta_<ddmmyyyy>.csv`, which holds exactly one trade date.
 
     Columns: `Date, Symbol, Expiry day, Strike Price, Option Type, Delta Factor`. Futures rows
-    carry `Option Type` of `FF`, a strike of 0 and a factor of exactly 1.0.
+    carry an `Option Type` of `FF`, a strike of 0 and a factor of exactly 1.00000000.
     """
-    factors: dict[tuple, float] = {}
-    dates: set[dt.date] = set()
-    with Path(path).open(encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(fh)
-        expected = {"Date", "Symbol", "Expiry day", "Strike Price", "Option Type", "Delta Factor"}
-        missing = expected - set(reader.fieldnames or [])
-        if missing:
-            raise BookError(
-                f"{path}: missing column(s) {sorted(missing)}. A renamed column means the "
-                f"format changed - see the 7 Dec 2026 cutover in docs/READING.md."
-            )
-        for lineno, rec in enumerate(reader, start=2):
-            if not rec["Symbol"].strip():
-                continue
-            dates.add(_parse_nse_date(rec["Date"], path, lineno))
-            # Checked here rather than after the loop, because the key below does not include
-            # the date: a second date makes every contract look like a duplicate and the
-            # error would name the wrong problem.
-            if len(dates) > 1:
-                raise BookError(
-                    f"{path} line {lineno}: more than one trade date "
-                    f"({', '.join(str(d) for d in sorted(dates))}). NSE publishes one file per "
-                    f"day, so this reader expects one trade date; use "
-                    f"load_delta_factors_by_date() for a file holding several."
-                )
-            key = (
-                rec["Symbol"].strip().upper(),
-                Instrument.from_nse(rec["Option Type"]),
-                _parse_nse_date(rec["Expiry day"], path, lineno),
-                Decimal(rec["Strike Price"].strip() or "0"),
-            )
-            if key in factors:
-                raise BookError(f"{path} line {lineno}: contract {key[0]} listed twice")
-            factors[key] = float(rec["Delta Factor"])
-
-    if len(dates) != 1:
-        raise BookError(f"{path}: expected one trade date, found {sorted(dates)}")
-    return DeltaFactors(dates.pop(), factors)
+    by_date = load_delta_factors_by_date(path)
+    if len(by_date) > 1:
+        raise BookError(
+            f"{path}: more than one trade date "
+            f"({', '.join(str(d) for d in sorted(by_date))}). NSE publishes one file per day, "
+            f"so this reader expects one; use load_delta_factors_by_date() for a file holding "
+            f"several."
+        )
+    return next(iter(by_date.values()))
 
 
 def load_delta_factors_by_date(path: str | Path) -> dict[dt.date, DeltaFactors]:
-    """Read a multi-day delta file into one  per date.
+    """Read a multi-day delta file into one `DeltaFactors` per date.
 
-    NSE publishes one file per day, so  requiring a single date is the
+    NSE publishes one file per day, so `load_delta_factors()` requiring a single date is the
     faithful reader. This is for a scenario fixture or a replay that holds several.
     """
-    buckets: dict[dt.date, dict[tuple, float]] = {}
+    buckets: dict[dt.date, dict[tuple, Decimal]] = {}
     with Path(path).open(encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
-        expected = {"Date", "Symbol", "Expiry day", "Strike Price", "Option Type",
-                    "Delta Factor"}
-        missing = expected - set(reader.fieldnames or [])
-        if missing:
-            raise BookError(f"{path}: missing column(s) {sorted(missing)}")
+        _require_columns(reader, _DELTA_COLUMNS, path)
         for lineno, rec in enumerate(reader, start=2):
-            if not rec["Symbol"].strip():
+            if _is_blank_row(rec):
                 continue
-            day = _parse_nse_date(rec["Date"], path, lineno)
-            key = (
-                rec["Symbol"].strip().upper(),
-                Instrument.from_nse(rec["Option Type"]),
-                _parse_nse_date(rec["Expiry day"], path, lineno),
-                Decimal(rec["Strike Price"].strip() or "0"),
-            )
+            day, key, factor = _delta_key_and_factor(rec, path, lineno)
             bucket = buckets.setdefault(day, {})
             if key in bucket:
-                raise BookError(f"{path} line {lineno}: {key[0]} listed twice for {day}")
-            bucket[key] = float(rec["Delta Factor"])
+                raise BookError(
+                    f"{path} line {lineno}: {key[0]} {key[1].value} expiring {key[2]} listed "
+                    f"twice for {day}"
+                )
+            bucket[key] = factor
+
     if not buckets:
         raise BookError(f"{path}: no delta factors")
-    return {d: DeltaFactors(d, f) for d, f in sorted(buckets.items())}
+    return {day: DeltaFactors(day, factors) for day, factors in sorted(buckets.items())}
 
 
 def _parse_nse_date(text: str, path: str | Path, lineno: int) -> dt.date:

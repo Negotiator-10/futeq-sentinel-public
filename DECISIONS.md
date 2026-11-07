@@ -695,3 +695,111 @@ the calendar comes from, and that turned out to matter more than the store itsel
 - **Outcome:** accepted, 7 Nov 2026. One thing deliberately left open and failing closed: the
   chaining of Sun 8 Nov, which Monday's run will refuse until observed. Also open: the ban-list
   half of the clearing question, and whether NSE amends the 2026 circular.
+
+## #014: Expiry in the ban-period baseline, 7 Nov 2026
+<!-- Authorship. The rule, the physical-settlement reasoning and all seven predicted outcomes
+     are mine, worked out on 7 Nov when Claude's expiry demonstration showed the baseline
+     crashes on every expiry day. Claude found the NSE FAQ answer that confirms it, and found
+     that the FAQ's wording sits one day earlier than my rule triggers - which is the open
+     question at the end. -->
+
+- **1. The rule.** When building the baseline for the ban-period check, a contract whose expiry
+  is **before** today's trade date contributes zero delta. A contract expiring today, or later,
+  is valued normally at today's NSE delta factor.
+
+- **2. Why.** Indian stock derivatives are physically settled. At expiry an in-the-money
+  position stops being an F&O position and becomes a delivery obligation in the cash market,
+  and an out-of-the-money option expires worthless. Either way its F&O delta is gone the next
+  day, which is why NSE publishes no factor for it.
+
+  And the disappearance is **passive**. Para 5.3.2 restrains changes the holder causes; the
+  holder did not trade to make an expired contract vanish, the calendar did. So it belongs in
+  the passive part of the day's change, which is never a breach, and treating the contract as
+  zero in the baseline puts it there.
+
+  **NSE says the same thing, in the same word.** NSE Clearing FAQ question 14, updated
+  13 Oct 2025: *"Increase in FutEq open interest for a stock in ban on account of expiry of near
+  month positions will be considered as a passive breach and shall not be considered as a
+  violation for levy of penalty on expiry day."* I derived the rule from physical settlement and
+  from 5.3.2's wording before reading that answer, which is in a document I had already summarised
+  on 30 Oct and had not connected to this problem.
+
+- **3. Where it goes, and where it does not.** The filtering happens where the baseline is
+  built, not inside `DeltaFactors.factor()`. Refusing a missing factor is correct everywhere
+  else - it normally means a position in a contract NSE did not price, which needs a person.
+  Expiry is the one case where the absence is expected, so it is handled before the lookup
+  rather than by weakening the lookup. `book.live_on()` is the selection; it decides nothing.
+
+- **4. Read the contract's `expiry` field, never a computed "last Thursday".** NSE moves an
+  expiry earlier when it would fall on a holiday. My own worked example used 24 Nov 2026 as the
+  November expiry and the verified calendar refused it: 24 Nov is Guru Nanak Jayanti
+  (NSE/FAOP/71777), and the last Thursday is the 26th. A rule that computed the date would have
+  to know that; reading the field does not.
+
+  Weekends need no special handling either. A contract expiring on a Friday has
+  `expiry < Monday`, so Monday's comparison drops it. The calendar decides which day is
+  yesterday; the expiry field decides whether the contract still counts.
+
+- **5. What it implies, including one consequence worth saying out loud.** Rolling **before or
+  on** expiry is permitted, because the old contract is still in the baseline, so closing it and
+  opening the same size in the next month leaves today's delta equal to the baseline.
+  Re-entering **after** expiry is a breach, because the baseline is zero and the new contract is
+  a position created from nothing - which is what "no fresh positions" means. An entirely
+  expired book gives a baseline of zero, so anything held the next day is a breach. Short
+  positions behave identically; the band is about delta moving away from zero in either
+  direction, not about sign.
+
+- **6. Expiry alone can never cause a breach, and that needed proving.** Zeroing an expired
+  contract shrinks the baseline, which **tightens** the band, so it is not obvious that the
+  tightening cannot fail by itself. It cannot: with no trading, today's holdings are yesterday's
+  minus whatever expired, and the baseline drops exactly the same contracts and values the
+  survivors at the same factors - so today's delta equals the baseline exactly.
+
+  This holds **only** because the baseline zeroes expired contracts. Valuing them at yesterday's
+  factor instead would leave today short of the baseline on a long book and over it on a short
+  one, and the expiry would read as the holder's doing. Tested across five holdings shapes,
+  including ones where the expiry makes the net delta *rise* - which is precisely the case FAQ
+  14 is answering.
+
+- **OPEN: the expiry day itself, and the two readings disagree.** FAQ 14 scopes its relief to
+  "on expiry day", and my rule triggers the day **after** expiry. Which threshold is right
+  depends on a fact about NSE's end-of-day position, not about the circular: **does an expiring
+  contract still carry open interest at its own expiry-day close?**
+
+  * If it does, the EoD position on expiry day still holds it, `expiry < today` is right, and
+    rolling on expiry day is permitted - case 2 above.
+  * If it does not, the EoD position already excludes it while yesterday's included it, so the
+    baseline must zero it on the expiry day itself (`expiry <= today`), and rolling on expiry
+    day becomes a breach.
+
+  Confirmed for the day after, from two files: no contract expiring on or before 29 Oct 2026
+  appears in either `Contract_Delta_30102026.csv` or the 30 Oct bhavcopy, so an expired
+  contract is gone from NSE's data the next day. The expiry day itself is unresolved, and one
+  download settles it - `BhavCopy_NSE_FO_..._20261029`, the October expiry day. If the expiring
+  contracts show open interest at that close, `expiry < today` stands.
+
+  The rule is implemented as `expiry < today` because that is the case that was crashing and the
+  common one. The expiry-day verdict rests on reasoning until that file is in the repo.
+
+- **Decision:** a contract expired before today contributes zero to the ban-period baseline;
+  one expiring today or later is valued at today's factor. Filtered in the caller, not in the
+  factor lookup. Read from the contract's own `expiry` field.
+
+- **Why:** the delta genuinely disappears at expiry under physical settlement, and it
+  disappears without the holder acting, so it is passive and a passive change is never a breach.
+
+- **Evidence:** NSE Clearing FAQ 14 calls an expiry-driven increase during a ban a "passive
+  breach" carrying no penalty. `Contract_Delta_30102026.csv` lists no contract expiring before
+  30 Oct, earliest 3 Nov, so a lookup for an expired contract refuses - which is what crashed.
+  The 30 Oct bhavcopy likewise carries zero rows for any expiry on or before 29 Oct. Sixteen
+  tests in `tests/test_expiry.py`, covering all seven predicted outcomes and the
+  cannot-breach-alone property across five holdings shapes.
+
+- **Alternatives rejected:** defaulting a missing factor to 1.0, which would silently treat an
+  unpriced option as a futures position and weaken a check that is correct everywhere else;
+  valuing an expired contract at yesterday's factor, which breaks the cannot-breach-alone
+  property; and computing the expiry date rather than reading it, which my own November example
+  showed to be wrong.
+
+- **Outcome:** accepted, 7 Nov 2026, with the expiry-day scope open pending one bhavcopy.
+  `check_ban_period_reduction()` is still unwritten; this is the rule it will apply.
