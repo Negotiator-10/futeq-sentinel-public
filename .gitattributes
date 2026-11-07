@@ -1,0 +1,22 @@
+# In a gitattributes file the LAST matching pattern wins, so the general rule goes first and
+# the exception after it. Getting this backwards silently does nothing, which is how the first
+# version of this file was written.
+
+# Normalise to LF in the repository, native endings in the working tree.
+* text=auto
+
+# Test fixtures are byte-exact inputs, not text that may be reformatted.
+#
+# `tests/test_transitions.py` asserts the sha256 of every ban-list fixture against the hashes
+# recorded in `tests/fixtures/transitions/SOURCES.md`, because a selected fixture without
+# provenance is data with no origin. If git rewrites the line endings on checkout, the bytes
+# change and those hashes stop matching.
+#
+# Proven on 7 Nov 2026, with `core.autocrlf=true` and no attributes file: a fresh clone turned
+# an 83-byte ban list into 87 bytes, and the checksum test failed in the clone while passing in
+# the original working tree and on Linux CI. That is the worst shape of bug - green everywhere
+# it is looked at, broken where it is used.
+#
+# `-text` rather than `binary`: no end-of-line conversion, but keep diffs, since these files
+# are small and readable and a diff on one is exactly what a reviewer wants to see.
+tests/fixtures/** -text
