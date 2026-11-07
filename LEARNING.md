@@ -108,6 +108,73 @@ within a day, and `README.md` carried a release date that `DECISIONS.md` #006 ha
 week earlier. The `rules.yaml` loader catches drift between `meta.unverified` and the tree;
 nothing catches drift between the prose files.
 
+## 7 Nov 2026
+
+### What I learned
+
+**1. A tolerance can be restated as an exact test.**
+NSE truncates headroom to whole shares; my figure keeps the decimals.
+Exact equality matched 0 of 216 rows even with a correct formula.
+But "chopping mine gives theirs" is the same statement as
+"mine minus theirs is in [0, 1)" — and that matched 216 of 216.
+A wrong threshold by one point would miss by ~570,000 shares, not <1.
+*Changes:* when two numbers can't be equal by construction, I find the
+exact test they *should* pass, instead of picking a "close enough" margin.
+
+**2. A test that can't fail isn't a test.**
+My first 218/218 seeded "banned yesterday" from the 30 Oct file's
+No Fresh Positions flag, in a column titled "Limit for Next Day."
+KAYNES (92.17%) and SAIL (84.93%) were in the dead zone, where
+is_in_ban() returns yesterday's state unchanged — so their forecast was
+the seed copied through. Answer in, answer out. Reseeding from the
+30 Oct ban list gave the same 218, but now it could have failed.
+*Changes:* before trusting a perfect score, I ask "would a broken engine
+also have passed this?"
+
+**3. Say what a result doesn't prove before someone else does.**
+On 30 Oct → 2 Nov only the hold branch fired: 0 entries, 0 releases.
+An engine that always says "not banned" would score ~99% on quiet days.
+The real evidence is the number of transitions, not scrip-days.
+*Changes:* I report results as "N real transitions, zero errors," and
+list the untested branches next to the headline.
+
+### What confused me
+
+- [confirm/reject] What a function signature is, and what `->` means.
+- [confirm/reject] Why `parse_ban_list()` isn't the thing that decides
+  whether a stock is banned — reading NSE's answer vs computing my own.
+- [confirm/reject] What CI is.
+- [confirm/reject] Whether the parser refusing `combineoi_13102026 (1).zip`
+  was right or just awkward. (If I hesitated, I need to check whether
+  "refuse loudly" is a principle I hold or a phrase I repeat.)
+- **Deciding vs checking: checking.** I often asked "what is my answer"
+  or "is this the right way" instead of committing to one first. The
+  honest answer is that it is a habit of seeking confirmation, not
+  genuine uncertainty.
+  *Changes:* never ask a question I could have guessed at. Write the
+  guess down first, then ask "here is my answer — where is it wrong?"
+
+### Interview questions I could not answer well yet
+
+**"Tell me what that result does not prove."** (1502/1502 scrip-days)
+Right structure, right idea, but I couldn't deliver it: two placeholders
+left where my own headline numbers should go, and a claim of a one-day
+lead that my own T+1 finding had already ruled out. The overclaim slipped
+in because "forecast" was the word I'd used all week.
+*Fix:* know my transition counts by heart, and never say "ahead" without
+checking what the data's date actually refers to.
+
+Still open from the Gaps list:
+- Why a delta-based measure beats counting contracts.
+- Which of MWPL's three limbs binds, and the single ratio that decides it.
+- What the ban-period penalty is counted per, in all three dimensions.
+
+### The most useful thing this week
+
+I now have an honest version of my headline result and a dishonest one,
+and I said both out loud within 24 hours. The dishonest one is the one
+that comes out under pressure, so that's the one to practise against.
+
 ## Gaps list
 Questions from teach-backs that need more work. Strike them out once you can answer them
 without notes.
