@@ -240,14 +240,24 @@ def test_there_is_no_way_to_read_a_forecast_as_a_prior_state(store):
 
     assert store.was_in_ban("INE000000001", TUE13) is False  # official, not the forecast
 
-    single_value_readers = [
+    # Every public member whose name mentions the forecast, and why each one is safe:
+    #   record_forecast   writes the column and returns a WriteResult, not a bool
+    #   scored_forecasts  yields (isin, symbol, forecast, official) - a shape nothing can
+    #                     mistake for a seed, because the official value is right beside it
+    allowed = {"record_forecast", "scored_forecasts"}
+    forecast_members = {
         name for name in dir(store)
         if not name.startswith("_") and "forecast" in name.lower()
-    ]
-    assert single_value_readers == ["scored_forecasts"], (
-        f"a new forecast reader appeared: {single_value_readers}. If it returns a bare bool it "
-        f"can be used as a seed, which is the feedback loop #012 forbids."
+    }
+    assert forecast_members == allowed, (
+        f"forecast-named members changed: {sorted(forecast_members ^ allowed)}. If a new one "
+        f"returns a bare bool it can be used as a seed, which is the feedback loop #012 "
+        f"forbids. Add it here only after checking it cannot be."
     )
+
+    # and the one that does return a bare bool reads `official`, never `forecast`
+    assert store.was_in_ban.__doc__ is not None
+    assert "official" in store.was_in_ban.__doc__
 
 
 def test_a_missing_official_value_refuses_rather_than_falling_back(store):

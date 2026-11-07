@@ -203,6 +203,9 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `BhavCopy_NSE_FO_0_0_0_20261030_F_0000.csv.zip` | 1,066,684 | `99da5162c5e18aa4f79183a0c546780d07d5c1dedfbbcb5f1a0fbf55af28158b` |
 | `Trading holiday for NSE.pdf` | 176,660 | `5a2079cd78b2e6b536ef0d28300e63b645721bed22cc82a91facf5945f3296ea` |
 | `combineoi_26082026.zip` | 21,000 | `5509c496379979f3142920fc07993fc1193ad7989ab3d19479106b923cc5e117` |
+| `combineoi_15102026.zip` | 21,713 | `b358fb195fe7ce652bd59d31809aa3476005829ac7cdfb8e92b2c7b231a34518` |
+| `combineoi_29102026.zip` | 22,193 | `cd9ef267176a03a6de0e8a51791f8bc6706f0f5a050add4394434633b2e2b31b` |
+| `combineoi_02112026.zip` | 22,219 | `853823d6981505551cda3f57b3d5c59e27ed69678732f2fd58df7ff569f79889` |
 
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
@@ -298,11 +301,17 @@ step in the chain sees the answer.
 | 12 Oct | 13 Oct | 213/213 | 0 | 0 |
 | 13 Oct | 14 Oct | 213/213 | 0 | 0 |
 | 14 Oct | 15 Oct | 213/213 | 0 | 0 |
+| 15 Oct | 16 Oct | 213/213 | 0 | 0 |
 | 26 Oct | 27 Oct | 213/213 | 0 | 0 |
 | 27 Oct | 28 Oct | 213/213 | 0 | 0 |
 | 28 Oct | 29 Oct | 219/219 | 0 | 0 |
+| 29 Oct | 30 Oct | 218/218 | 0 | 0 |
 | 30 Oct | 2 Nov | 218/218 | 0 | 0 |
-| **total** | | **1502/1502** | **0** | **0** |
+| **total** | | **1933/1933** | **0** | **0** |
+
+Two days are reported as unscored rather than scored against the wrong answer: 26 Aug, whose
+own ban list is not downloaded, and 2 Nov, whose next trading day is 3 Nov and that ban list
+is not on disk either. The scorer names both and drops them.
 
 All seven transitions were forecast correctly, and the utilisation at the prior close shows
 which branch fired:
@@ -327,13 +336,42 @@ says "exceeds", so the config operator is `>`; I noted on 1 Nov that a scrip sit
 95% is therefore not in ban, which read as pedantry about a single word. This row is 0.0135 of a
 percentage point from being the case that tests it.
 
-**What the 1502 does and does not establish.** 1,495 of those scrip-days are a security nowhere
+**What the 1933 does and does not establish.** All but a couple of dozen of those scrip-days are a security nowhere
 near either threshold staying nowhere near it, so the number is a statement about false alarms:
-zero, across 1502 scrip-days. The test of the *logic* has a sample of **seven**. Still untested:
+zero, across 1933 scrip-days. The test of the *logic* has a sample of **seven**. Still untested:
 the exact boundaries (95.01% is not 95.00%, and no row has ever sat on either line), a missing or
 unknown prior state (every scored day had its seed), and a newly listed scrip near a threshold -
 the universe moved 213 to 219 to 218 within the sample, so new scrips did appear, none of them
 close to a line.
+
+## Scoring through the store rather than from the files
+
+`scripts/score_bans.py` re-reads every file on each run, which is the right shape for a
+one-off check and the wrong shape for something that runs nightly. `sentinel.ingest` loads the
+same files into the point-in-time store (`DECISIONS.md` #012) and the score comes out of the
+store instead:
+
+    8 day(s) scored, 1719 of 1719 scrip-days agree
+
+Fewer days than the script's nine, and for a reason worth recording: storing a day's `official`
+state needs that day's `combineoi` as well as its ban list, because `fo_secban` carries no ISIN
+and the store is keyed on ISIN (#011 Q2). So 16 Oct and 3 Nov have a stored forecast and no
+answer beside them - their ban lists are on disk, their `combineoi` files are not - and 12 Oct
+and 26 Oct have an answer with no forecast, being the earliest measurement day in each run.
+Those four are the edges of the sample, not failures.
+
+`load_official_day()` currently requires the ban list and the `combineoi` to be for the **same
+date**, which is stricter than #011 Q2 specified ("a `combineoi` for a date close enough to
+resolve every symbol in it"). The strictness cost three days of coverage on 7 Nov and was
+resolved by downloading three more `combineoi` files rather than by relaxing the rule, so no
+row's ISINs are resolved from a different day's file.
+
+Two properties make the load safe to repeat, which is what `PLAN.md` D5 means by safe re-runs:
+
+* loading the same file twice is a **no-op** - every value already stored and identical;
+* loading a *different* file for a day already stored is a **conflict**, raised with both
+  values and the scrips named. An input that changed under us is a finding rather than
+  something to overwrite, and the `input_sha256` on every row is what makes it detectable.
 
 ## The trading calendar, and the clearing list that is not the same thing
 

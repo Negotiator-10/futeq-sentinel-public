@@ -38,14 +38,14 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from sentinel.calendar import DayKind, TradingCalendar, UnknownDateError
 
-__all__ = ["Source", "StateRecord", "BanStateStore", "StoreError"]
+__all__ = ["Source", "StateRecord", "WriteResult", "BanStateStore", "StoreError"]
 
 
 class Source(Enum):
@@ -95,6 +95,29 @@ class StateRecord:
                 f"{self.input_sha256!r}. Every record names the file it came from, so a day can "
                 f"be traced back to the bytes behind it."
             )
+
+
+@dataclass(frozen=True)
+class WriteResult:
+    """What a targeted write actually did, so a re-run can be reported rather than guessed at."""
+
+    day: dt.date
+    column: str
+    written: int
+    unchanged: int
+
+    @property
+    def was_a_no_op(self) -> bool:
+        """True when every value was already stored and identical - a safe, idempotent re-run."""
+        return self.written == 0 and self.unchanged > 0
+
+    def __str__(self) -> str:
+        if self.was_a_no_op:
+            return f"{self.day} {self.column}: already current, {self.unchanged} row(s) unchanged"
+        return (
+            f"{self.day} {self.column}: {self.written} written"
+            + (f", {self.unchanged} already current" if self.unchanged else "")
+        )
 
 
 _SCHEMA = """
@@ -207,6 +230,115 @@ class BanStateStore:
                 f"not a retry."
             ) from exc
         return len(rows)
+
+    # -- targeted writes, one column at a time --------------------------------------------
+    #
+    # A record for (isin, D) holds NSE's `official` state for D and the engine's `forecast`
+    # for D, and those two arrive at different times from different files: the forecast is
+    # computed after D-1's close, the official state is published for D itself. So each
+    # writer fills in its own column and leaves the other alone, rather than the whole row
+    # being written once.
+    #
+    # Re-running with the same input is a no-op, which is what makes a re-run safe. Re-running
+    # with a DIFFERENT value for a column already written is a conflict and is reported with
+    # both values: it means the input file changed under us, and that is a finding rather than
+    # something to overwrite. `replace=True` exists for when overwriting is the intention.
+
+    def record_official(
+        self, day: dt.date, values: Mapping[str, tuple[str, bool]], *,
+        input_sha256: str, source: Source = Source.NSE, replace: bool = False,
+    ) -> WriteResult:
+        """Write NSE's published state for `day`. `values` maps ISIN to `(symbol, in_ban)`."""
+        return self._write_column(day, "official", values, input_sha256, source, replace)
+
+    def record_forecast(
+        self, day: dt.date, values: Mapping[str, tuple[str, bool]], *,
+        input_sha256: str, source: Source = Source.COMPUTED, replace: bool = False,
+    ) -> WriteResult:
+        """Write the engine's forecast for `day`. Never read back as a seed - see `was_in_ban`."""
+        return self._write_column(day, "forecast", values, input_sha256, source, replace)
+
+    def _write_column(
+        self, day: dt.date, column: str, values: Mapping[str, tuple[str, bool]],
+        input_sha256: str, source: Source, replace: bool,
+    ) -> WriteResult:
+        if column not in ("official", "forecast"):
+            raise StoreError(f"unknown column {column!r}")
+        if len(input_sha256) != 64:
+            raise StoreError(
+                f"input_sha256 is {input_sha256!r}. Every record names the file it came from, "
+                f"so a day can be traced back to the bytes behind it."
+            )
+
+        kind = self.calendar.kind(day)
+        if kind is DayKind.UNKNOWN:
+            raise UnknownDateError(
+                f"refusing to store state for {day}: no verified calendar covers it."
+            )
+        if not kind.has_session:
+            raise StoreError(
+                f"refusing to store state for {day}: the verified calendar says it is a "
+                f"{kind.value}. A non-trading day with data is a contradiction."
+            )
+
+        existing = {
+            r["isin"]: r[column]
+            for r in self._conn.execute(
+                f"SELECT isin, {column} FROM ban_state WHERE trade_date = ?", (day.isoformat(),)
+            )
+        }
+
+        to_write: list[tuple] = []
+        unchanged = 0
+        conflicts: list[tuple[str, str, bool, bool]] = []
+        now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+        for isin, (symbol, value) in values.items():
+            StateRecord(                      # reuse the invariants rather than repeat them
+                isin=isin, trade_date=day, symbol=symbol,
+                official=value if column == "official" else None,
+                forecast=value if column == "forecast" else None,
+                source=source, input_sha256=input_sha256,
+            )
+            prior = existing.get(isin, "absent")
+            if prior is not None and prior != "absent" and bool(prior) != value and not replace:
+                conflicts.append((isin, symbol, bool(prior), value))
+                continue
+            if prior is not None and prior != "absent" and bool(prior) == value:
+                unchanged += 1
+                continue
+            to_write.append((isin, day.isoformat(), symbol, int(value), source.value,
+                             input_sha256, now))
+
+        if conflicts:
+            lines = "\n".join(
+                f"    {sym} ({isin}): stored {was}, now given {now_}"
+                for isin, sym, was, now_ in conflicts[:10]
+            )
+            raise StoreError(
+                f"{day}: {len(conflicts)} scrip(s) already have a different {column} value. "
+                f"The input file has changed since it was loaded, which is a finding rather "
+                f"than something to overwrite. Pass replace=True only when that is the "
+                f"intention.\n{lines}"
+            )
+
+        if to_write:
+            other = "forecast" if column == "official" else "official"
+            with self._conn:
+                self._conn.execute("BEGIN")
+                self._conn.executemany(
+                    f"INSERT INTO ban_state "
+                    f"(isin, trade_date, symbol, {column}, {other}, source, input_sha256, "
+                    f" note, written_at) VALUES (?,?,?,?,NULL,?,?,'',?) "
+                    f"ON CONFLICT (isin, trade_date) DO UPDATE SET "
+                    f"  {column} = excluded.{column}, "
+                    f"  symbol = excluded.symbol, "
+                    f"  source = excluded.source, "
+                    f"  input_sha256 = excluded.input_sha256, "
+                    f"  written_at = excluded.written_at",
+                    to_write,
+                )
+        return WriteResult(day=day, column=column, written=len(to_write), unchanged=unchanged)
 
     # -- reading. `official` only, by design ----------------------------------------------
 
