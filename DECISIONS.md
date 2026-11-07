@@ -901,3 +901,99 @@ the calendar comes from, and that turned out to matter more than the store itsel
 - **Outcome:** accepted, 8 Nov 2026. `PropBook.flat()` and the loader support are in, with 15
   tests. The signature change and both date checks belong to `check_ban_period_reduction()`,
   which is not yet in the repo.
+
+## #016: Entity-level position limits, SPEC row 7, 8 Nov 2026
+<!-- Authorship. All five decisions are mine, made on 8 Nov from the source text of SEBI
+     2025/79 para 5.8, the Master Circular clauses it recalibrates, and NSE Clearing FAQ
+     questions 15 and 16, which Claude laid out before I decided anything. Claude found the
+     FAQ 15 error and the doubling of the Cat II limits in the history; the two consequences
+     at the end are Claude's, put to me as questions. -->
+
+The limits are in para 5.8.1, as a share of MWPL for futures and options combined on one
+underlying: Client/NRI 10%; TM proprietary 20%; TM proprietary plus clients, FPI Category I and
+mutual funds 30%; FPI Category II other than the sub-category of individuals, family offices and
+corporates 20%; that sub-category 10%. `config/rules.yaml` already carried all seven keys.
+
+- **1. FPI Category II is two categories and never one.** `FPI_CAT_II_IFC` at 10% and
+  `FPI_CAT_II_OTHER` at 20%, with no bare Cat II member.
+
+  The trap is sharper than "collapsing Cat II into one number". NSE's own Clearing FAQ,
+  question 15, summarises the split as individuals versus "non-individuals". Under SEBI a Cat II
+  corporate or family office belongs with individuals at 10%; under the FAQ's wording it is a
+  non-individual at 20% - double. A Cat II holder can therefore only be categorised through
+  `Category.for_fpi_cat_ii()`, which puts corporates and family offices with individuals and
+  refuses an unrecognised sub-category instead of defaulting, since the only available default
+  is the lenient 20%. A regression test pins it. Logged in `docs/doubts.md` entry 8.
+
+  The FAQ answered two of my questions correctly this week - Q14 on expiry and Q16 on the
+  penalty - and is wrong here. Near-primary is not primary.
+
+- **2. The measure: net within each UCC, gross-added across an entity's UCCs, in shares.**
+  Para 5.8 sets percentages and never says how a holder's position is counted, so this is an
+  inference, recorded as one, from four places that all point the same way:
+
+  * para 5.1.1 measures participants' OI as **net** delta-adjusted positions at portfolio level;
+  * para 5.1.2 nets within a UCC and **gross-adds across** UCCs;
+  * Master Circular cl 3.3.2.2.1, the customer-level clause 5.8.1 replaces, limited the **gross**
+    open position across all contracts on a stock;
+  * the FPI monitoring clause stock derivatives import (cl 4.3.3.2 into 1.3.3.2.3) computes limits
+    on a **gross basis at the level of the FPI**.
+
+  It is also the cautious direction: the sum of each UCC's absolute net is never less than the
+  entity's net, so if the inference is wrong it over-reports rather than hides. A long UCC and a
+  short UCC of the same entity do not cancel - the same spirit as the per-UCC ban-period check in
+  SPEC row 6.
+
+- **3. The function aggregates, not the caller.** SPEC row 7's original signature,
+  `check_entity_limit(category, futeq_oi, mwpl)`, took one number, so the caller summed. But a
+  trading member faces two limits on two different totals - its proprietary book against 20%,
+  and its proprietary book plus all its clients against 30% - and a function given one number
+  cannot know which total it was handed. So it returns one check per (entity, scrip, limit), a TM
+  gets two, and the signature changes. `SPEC.md` row 7 is updated.
+
+- **4. An MWPL cut that pushes an unchanged position over the limit is reported as over the
+  limit, with cause = passive.** Whether it is exempt from penalty is unresolved: Master Circular
+  cl 4.3.3.4 imports the index rule that a breach caused by falling market OI is "passive" and not
+  a violation, but that rule is written about OI, not about MWPL, which is what moves a stock
+  limit. Reporting it with its cause hides nothing while the exemption stays open - `doubts.md`
+  entry 9.
+
+- **5. Every check is returned, carrying `excess_shares`; the penalty amount is a separate
+  step.** FAQ question 16 charges the entity-limit penalty on the "excess quantity over the
+  allowed quantity", valued at the cash-market close: 1% of that value or Rs 1 lakh, whichever is
+  lower, with a Rs 5,000 minimum, per entity per stock per day. So the excess in shares is what the
+  report has to carry. Returning every check, not only breaches, is the same reason
+  `reconcile()` and `check_ban_period_reduction()` do: "nothing checked" must not look like
+  "everything passed".
+
+  The same three figures appear in `rules.yaml` against the **ban-period** `penalty_rate`, which
+  is marked unverified. Same numbers, different rule; not assumed to be the same thing.
+
+- **The history, because it changes the numbers.** The Master Circular clauses 5.8.1 recalibrates
+  (3.3.2.3 to 3.3.2.5) had brokers, FPI Cat I and MFs at 20%, Cat II other at 10%, and the Cat II
+  individual / family-office / corporate group at 5%. The 2025 circular doubled both Cat II
+  limits. Anything written before October 2025 gives half the current figure.
+
+- **Out of scope: para 5.8.1.6.** A joint exchange SOP to watch concentrated positions of top
+  entities at delta and notional level. Surveillance, not a limit - no threshold to test. Kept as
+  a v0.2 idea, since the per-entity FutEq positions already exist. `doubts.md` entry 10.
+
+- **Two consequences, still open and both mine to answer before the function is written.**
+
+  * Decision 3 needs reference data that does not exist yet. "Proprietary plus clients" needs to
+    know which UCCs are a TM's clients, so the date-effective `ucc -> category` table needs a
+    trading-member column. And underneath it: does an FPI or a mutual fund that trades through a
+    TM count as one of its "clients" for the 30%?
+  * Decision 4 needs yesterday. "Unchanged or reduced, and MWPL fell" compares two days, so - like
+    row 6 - the function takes yesterday's position and yesterday's MWPL as well.
+
+- **Decision:** the five above. `sentinel.entities.Category` is built, with the two Cat II members
+  and the FAQ regression test. `check_entity_limit()` is not yet written.
+
+- **Alternatives rejected:** one Cat II member with an "is individual" flag, which is the FAQ's
+  error in a different shape; netting across an entity's UCCs, which is not what any of the four
+  clauses describes and is the lenient direction; the caller aggregating, which cannot serve a
+  TM's two limits; silently exempting MWPL-driven breaches, which would decide an open question by
+  omission.
+
+- **Outcome:** accepted, 8 Nov 2026. The function waits on the two consequences above.
