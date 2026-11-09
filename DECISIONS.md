@@ -997,3 +997,83 @@ corporates 20%; that sub-category 10%. `config/rules.yaml` already carried all s
   omission.
 
 - **Outcome:** accepted, 8 Nov 2026. The function waits on the two consequences above.
+
+### #016 addendum: the aggregation units and the cause rule, 8 Nov 2026
+<!-- Authorship. A, B, 1a, 1b and the revised citation are mine, answered on 8 Nov to questions
+     Claude raised from the source text. The (tm, ucc) key and the sign-flip edge case are mine;
+     Claude added the sub_category check that holds decision 1 at the table. -->
+
+- **1a. A broker's "clients" are only CLIENT/NRI accounts.** Master Circular cl 1.3.3.3, imported
+  for stock derivatives by cl 4.3.3.3, says that for position-limit monitoring mutual funds are
+  treated as trading members, the same way registered FPIs are. So an FPI or MF that trades
+  through a broker is not inside that broker's book: each is a top-level holder with its own limit.
+  The three holders in para 5.8.1.3 share a percentage, not a pool. Recorded as an inference - the
+  text never defines "client", it gets there by treating FPIs and MFs as TMs.
+
+- **1b. A mutual fund is its own level, with its schemes as its accounts.** The same clause treats
+  MF schemes as clients, and Annexure 1 of 2025/79 computes index-futures limits gross at the level
+  of the MF. Whether each scheme also faces the client limit is open - `doubts.md` entry 11.
+
+- **Decision 2's fourth citation is contradicted, and the rule stands.** I cited the FPI monitoring
+  clause's "gross basis at the level of FPI". Annexure 1 of the same 2025 circular restates the
+  index-futures rule as gross at the level of the MF but **net** at the level of the FPI, client,
+  MF sub-scheme and proprietary position. Two caveats: that is an index-futures, gross-notional
+  regime rather than single-stock FutEq; and "net at the level of the FPI" may mean netting within
+  one holder, which is my rule. If it does apply to single stocks, gross-adding across an FPI's
+  sub-accounts reports at least the true figure, so the error would be an overstatement - the safe
+  direction. The rule keeps three supporting citations and the direction argument; it no longer
+  claims the fourth cleanly. `doubts.md` entry 12.
+
+- **A. Two date-effective tables.** `holders (effective_from, holder_id, category, sub_category)`
+  and `accounts (effective_from, tm, ucc, holder_id, is_proprietary)`.
+
+  * Accounts are keyed on **(tm, ucc)**, not ucc, because a UCC is a code a trading member assigns
+    and the same string can exist under two brokers.
+  * The trading member belongs to the **account**, not the holder. A client can hold UCCs at two
+    brokers: the client's own 10% gross-adds both, while each broker's 30% counts only the UCC
+    registered under it.
+  * The aggregates: a holder's own limit spans all its accounts across every TM; a TM's 20% is its
+    proprietary accounts; a TM's 30% is those plus CLIENT/NRI accounts registered under it.
+  * Cat II holders carry a sub_category and the loader refuses a row where it disagrees with the
+    category, so a corporate cannot be typed in as `fpi_cat_2_other`. That holds decision 1 at the
+    table rather than only in code.
+  * Invariants checked per date: every account's holder exists; `is_proprietary` agrees with the
+    holder being `tm_proprietary`; and a proprietary account's `holder_id` equals its `tm`.
+  * **A trading member's `holder_id` is its member code - a convention, enforced.** Review on 8 Nov
+    found that a proprietary account registered under TMA but owned by TMB loaded without error, so
+    TMA's 20% would have been computed on positions TMA does not own. Nothing linked a TM's member
+    code in the accounts table to its row in the holders table. NSE's member code already identifies
+    a TM uniquely, so it serves as the holder id; a separate `tm` column on holders would be a second
+    copy of the same fact, blank on nearly every row, needing its own filled-exactly-when rule, and
+    able to disagree with the first. The same reasoning kept delta out of `Position` and the category
+    out of the accounts table. A convention stated only in prose is the risk, so the loader refuses
+    any proprietary account whose `holder_id` is not its `tm`, naming both. That also makes a TM's
+    proprietary book single-owned by construction, which replaced a separate two-owners check.
+
+- **B. The cause of a breach uses row 6's baseline.** For one holder and scrip,
+
+      G = sum over the holder's UCCs of |net FutEq of that UCC|
+
+  which is decision 2's gross measure. **ACTIVE** if G at today's holdings exceeds G at yesterday's
+  live holdings, both at today's factors; otherwise **PASSIVE**. Comparing G at constant factors
+  isolates what the change in holdings did, exactly as row 6's active part does.
+
+  "Passive" therefore covers two mechanisms, not one: an MWPL cut, and FutEq rising with unchanged
+  holdings because option factors moved - row 6's 21 Oct, up 200 shares with no trade. Yesterday's
+  MWPL only names which mechanism it was, in the reason string. So a missing MWPL file makes the
+  reason less specific; it never makes the cause unknown.
+
+  **The sign-flip edge case, recorded deliberately.** A UCC that goes from +100 to -100, or a holder
+  that moves exposure from a long UCC to a short one, has really traded, but G is unchanged, so the
+  cause is not ACTIVE. That is correct for the question G answers - did the holdings change add to
+  the gross position - and it means PASSIVE does not mean "did not trade".
+
+- **2 (revised). Yesterday is `PropBook | NoPriorDay`.** A newly listed scrip is not a gap:
+  yesterday's book is the whole book and simply holds nothing in that scrip. Only the first run
+  has no prior day, and that is written deliberately as `NoPriorDay`, the same lesson as
+  `PropBook.flat()` in #015. The verdict is always computed; the cause is ACTIVE, PASSIVE or a
+  stated UNKNOWN, and is None exactly when the check is permitted, enforced in `__post_init__`.
+
+- **Outcome of the addendum:** the reference tables are built in `sentinel.entities`, with 22 tests.
+  One question remains before the function: `Position` has a `ucc` field and no `tm`, so a book
+  cannot yet tell the same UCC at two brokers apart.
