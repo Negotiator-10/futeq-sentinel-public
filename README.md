@@ -25,18 +25,24 @@ list for that day.
 
 | | |
 |---|---|
-| Scrip-days agreeing | **1933 of 1933** |
+| Scrip-days agreeing, 12 Oct to 9 Nov 2026 | **3241 of 3241** |
 | False positives | 0 |
 | False negatives | 0 |
-| Ban transitions in the sample | **7** — 3 entries, 4 releases |
-| Transitions forecast correctly | 7 |
+| Ban transitions in the sample | **8** — 3 entries, 5 releases |
+| Transitions forecast correctly | 8 |
+| Scrip-days inside the 80–95% band | **101** — 27 held, 74 stayed out, all correct |
 
-**Read the second number, not the first.** Almost all of those 1933 scrip-days are a security
+**Read the last two numbers, not the first.** Almost all of those 3241 scrip-days are a security
 nowhere near either threshold staying nowhere near it, so a model answering "never banned" would
-score about 98.9% on the same data. The number that tests the logic is **seven** — the days a
-scrip actually entered or left a ban. Those are the cases where being wrong is possible.
+score 99.04% on the same data. The numbers that test the logic are the **eight** days a scrip
+actually entered or left a ban, and the **101** scrip-days that closed inside the band, where the
+right answer depends only on whether the scrip was in ban the day before. A single line at 95%
+would get the 27 held ones wrong; a single line at 80% would get the 74 that stayed out wrong.
 
-The seven, with the utilisation at the prior close:
+SAIL shows both in one week. It closed at 80.51% on 4 November while in ban and was held; it
+closed at 82.79% on 6 November, higher, after its release, and stayed out.
+
+The eight transitions, with the utilisation at the prior close:
 
 | Effective | Symbol | Direction | Utilisation |
 |---|---|---|---|
@@ -47,8 +53,9 @@ The seven, with the utilisation at the prior close:
 | 28 Oct 2026 | AMBUJACEM | release | 70.02% |
 | 28 Oct 2026 | KAYNES | release | 66.96% |
 | 29 Oct 2026 | KAYNES | entry | 95.67% |
+| 6 Nov 2026 | SAIL | release | 79.52% |
 
-Three entries all just above the 95% line, four releases all at or below 80%, and nothing in the
+Three entries all just above the 95% line, five releases all at or below 80%, and nothing in the
 fifteen points between — the hysteresis band, empty of transitions.
 
 **SAIL on 15 October is the row I would put in front of anyone.** At the previous close its
@@ -102,7 +109,7 @@ Python 3.12.
 
 ```
 pip install -e ".[dev]"
-pytest                        # 185 tests
+pytest                        # 351 tests
 python scripts/score_bans.py  # reproduces the full score from the files in data/
 ```
 
@@ -111,8 +118,10 @@ installed to import it, because `pyproject.toml` puts `src` on the path for `pyt
 script adds it itself.
 
 `score_bans.py` exits 0 and explains itself when `data/` is absent, since the raw files are
-gitignored. `tests/test_transitions.py` proves the seven transitions from committed fixtures, so
-the result is checked on every push without needing the raw data.
+gitignored. `tests/test_transitions.py` proves the first seven transitions from committed
+fixtures, so they are checked on every push without needing the raw data. SAIL's 6 November
+release, and the two in-band SAIL days around it, are scored from `data/` only and are not yet
+fixtures.
 
 ## How it is put together
 

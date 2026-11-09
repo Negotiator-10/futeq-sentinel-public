@@ -213,6 +213,12 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `fo_secban_09112026.csv` | 55 | `b0aa285238c3dd954f7ab5984969bd59c3bba1316a0986e560479c97bac2b3ce` |
 | `combineoi_06112026.zip` | 22,285 | `f3be2b174de74e48e641618719c496cff3d5fde6e49f386a56a181683316ea84` |
 | `combineoi_08112026.zip` | 22,249 | `778bb013279b1f3356a5b60d7515369ecbe0a075d8c368d895be3344106fe1d6` |
+| `fo_secban_03112026.csv` | 62 | `9abe24b292ff44b806c698dfd21b73e11d2ea07062f2f40e02e17ba3c5c9bc7f` |
+| `fo_secban_04112026.csv` | 62 | `2300055b6835841bb8413346df37d631efb298fc89e85ee82d4dc7811f24fb4e` |
+| `fo_secban_05112026.csv` | 62 | `d06b6b64082f0d12562423b3ce6a765af614c28b38e995d5d00a1b3a6ba3e519` |
+| `combineoi_03112026.zip` | 22,197 | `a3d4684b259f70ca7f3221e9df228f8527262dbb055dca7c951ef37db7f8a9be` |
+| `combineoi_04112026.zip` | 22,230 | `e30c75145054f23b23f67a1ce054197b697ef9eadd9fbfc0680c9842d5e692a0` |
+| `combineoi_05112026.zip` | 22,227 | `9a29fff3a287f474511061be17893e3c933fb2e1875fd34bf8a1f6c5265e5656` |
 
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
@@ -350,6 +356,58 @@ the exact boundaries (95.01% is not 95.00%, and no row has ever sat on either li
 unknown prior state (every scored day had its seed), and a newly listed scrip near a threshold -
 the universe moved 213 to 219 to 218 within the sample, so new scrips did appear, none of them
 close to a line.
+
+## SAIL's release, and the score to 9 Nov 2026
+
+Scored 9 Nov, after downloading the 3, 4 and 5 Nov ban lists and `combineoi` files (checksums
+above). The SAIL check was set up to catch a release on 3 Nov; the 2 Nov file already said there
+would not be one - 84.70%, inside the band, with NSE's own flag set for the next day - so the six
+files cover the whole walk down instead:
+
+| Close | SAIL utilisation | In ban that day | `No Fresh Positions` | Next list has SAIL |
+|---|---|---|---|---|
+| Mon 2 Nov | 84.70% | yes | set | 3 Nov: yes |
+| Tue 3 Nov | 84.10% | yes | set | 4 Nov: yes |
+| Wed 4 Nov | 80.51% | yes | set | 5 Nov: yes |
+| Thu 5 Nov | 79.52% | yes | not set | 6 Nov: **no** - release |
+| Fri 6 Nov | 82.79% | **no** | not set | 8 Nov: no |
+
+**Both sides of the band on one stock in one week.** On 4 Nov SAIL is 0.51 points above the
+exit and is held. On 6 Nov it is *higher* than on the 4th and stays out. The only thing that
+differs is yesterday's state, which is the whole of the hysteresis rule, and the forecast gets
+both right. Neither is a boundary test: 80.51% and 79.52% are half a point either side of the
+line, not on it.
+
+**The score, every measurement day on disk:**
+
+| measurement | forecast for | agree | false pos | false neg |
+|---|---|---|---|---|
+| 12 Oct to 30 Oct | 13 Oct to 2 Nov | 1933/1933 | 0 | 0 |
+| 2 Nov | 3 Nov | 218/218 | 0 | 0 |
+| 3 Nov | 4 Nov | 218/218 | 0 | 0 |
+| 4 Nov | 5 Nov | 218/218 | 0 | 0 |
+| 5 Nov | 6 Nov | 218/218 | 0 | 0 |
+| 6 Nov | 8 Nov | 218/218 | 0 | 0 |
+| 8 Nov | 9 Nov | 218/218 | 0 | 0 |
+| **total** | | **3241/3241** | **0** | **0** |
+
+Eight transitions, all forecast correctly: the seven above plus **SAIL's release effective 6 Nov,
+from 79.52%**. Three entries, five releases.
+
+The last two rows are the first forecasts scored **through the Muhurat session**, which the
+calendar refused until the `chaining_verified` row went in on 9 Nov (#013 addendum). They are
+correct, but they do not test the chaining verdict: KAYNES is the only ban on all three days, so
+the skip reading would have scored the same.
+
+**Two better numbers than the 3241.** Of those scrip-days, 31 are banned in NSE's answer, so a
+model answering "never banned" scores 99.04%. The sample that tests the band is the **101
+scrip-days that closed inside it** (above 80%, at or below 95%), where the right answer depends
+only on the previous day: **27 were held** because they were in ban, and **74 stayed out**
+because they were not. A single threshold at 95% gets the 27 wrong; a single threshold at 80% gets
+the 74 wrong. The engine gets all 101.
+
+Still untested, unchanged from above: either line exactly, a missing prior state, and a new
+scrip near a line.
 
 ## Scoring through the store rather than from the files
 
