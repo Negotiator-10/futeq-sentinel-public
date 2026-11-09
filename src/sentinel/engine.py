@@ -336,7 +336,7 @@ def check_ban_period_reduction(
             f"{factors_today.trade_date}"
         )
 
-    # Raises ChainUnverifiedError on unverified days (e.g. Muhurat), so the
+    # Raises ChainUnverifiedError on an unverified special session, so the
     # check fails closed there with no code of its own.
     expected_yesterday = calendar.previous_trading_day(trade_date)
     if yesterday.trade_date != expected_yesterday:
