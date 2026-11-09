@@ -1201,3 +1201,62 @@ corporates 20%; that sub-category 10%. `config/rules.yaml` already carried all s
   keying (#016), and SAIL's scoring and fixtures (#017).
 - **Outcome:** accepted, 9 Nov 2026. Recorded in `PLAN.md` under Week 2. Row 7's design is
   complete, so only its implementation waits.
+
+## #019: The pipeline runner, 9 Nov 2026
+
+**What.** One command runs a trading day D end to end: ingest, check,
+forecast D+1, reconcile, row 6, report.
+
+1. **Per-consumer refusal.** Everything is framed from run date D.
+   - Missing `combineoi_D`, or D unknown/unverified in the calendar:
+     the whole run refuses.
+   - Missing `fo_secban_D`: the forecast seed refuses in-band scrips
+     only (#012); D's official state is stored as missing; D-1's
+     forecast is reported unscored; row 6 refuses.
+   - Missing positions or delta factors for D or the previous trading
+     day: row 6 refuses; everything else runs.
+2. **Why combineoi_D is required.** The store is keyed on ISIN; ban
+   lists carry symbols, resolved only through the same day's combineoi
+   (#011 Q2). An older mapping goes silently wrong on the day of a
+   rename or reuse.
+3. **Atomic per run.** All of D's results commit in one transaction,
+   only after every stage finishes. A refusal is a stored result, not
+   a failure. Inside run D's transaction the store enforces #011's
+   timing: ban_state accepts D's official state and the next trading
+   day's forecast, and nothing else.
+4. **Run log, outside the transaction.** RUNNING before; COMPLETED,
+   REFUSED or FAILED after. Columns: run_id, trade_date, started_at,
+   finished_at, outcome, reason, input_checksums, code_version, dirty,
+   rules_checksum, calendar_checksum.
+5. **Missing vs not run.** A missing input is a refusal record in the
+   day's transaction. "Not run" is no COMPLETED row in the run log.
+   A NULL alone means nothing.
+6. **Stale RUNNING row.** With no lock held, mark it ABANDONED (time,
+   superseding run_id) and start a new row. With the lock held, refuse.
+7. **Uncommitted code.** Record commit plus dirty flag; the report
+   footer says "not reproducible". README results come only from clean
+   runs.
+8. **Report rendered from the store** plus the run log, never from
+   memory. Same store, same report; a crash after commit costs nothing.
+   Order: refusals, flag disagreements, row 6 breaches, tomorrow's ban,
+   watchlist, checks passed, audit footer.
+9. **Watchlist is the 80–95% band**, with distance to the line that
+   applies to each scrip. No new threshold.
+10. **Residuals:** the report shows the count; min and max stay in the
+    store.
+11. **Re-runs:** identical inputs give identical results. A changed
+    input refuses, naming the file and both checksums. Supersede and
+    the stale-day cascade move to v1.0.
+
+**Why.** Every piece applies a rule already in the project: missing
+inputs are stated, never inferred (#011, #015); nothing derived is
+stored beside its inputs; results that cost money fail loudly.
+
+**Evidence.** On 4 Nov, no prop book exists for 3 or 4 Nov, so row 6
+refuses there: the per-consumer rule in a real case. ban_state.official
+is nullable, so "missing" and "not run" are indistinguishable without
+the refusal record and run log.
+
+**Outcome.** Accepted, 9 Nov 2026. Store tables (run_log, measurement,
+reconciliation, row6_check, refusal) built as plumbing; the runner
+itself is mine, Tue 10 Nov.
