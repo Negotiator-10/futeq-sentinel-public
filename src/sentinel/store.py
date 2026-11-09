@@ -31,21 +31,50 @@ what lets any day be traced back to the bytes it came from.
 The store lives in `data/`, which is gitignored, because it is derived data rebuilt from
 checksummed NSE files - so it never needs to be diffed in git. `dump_csv()` exists for the
 times a person wants to read a day by eye.
+
+**The runner's tables (#019).** A run on D writes its results through `day_transaction()`, one
+SQLite transaction that every writer joins, so a crash part-way leaves nothing of D behind
+(decision 3). Four result tables accept writes *only* inside it - `measurement`, `reconciliation`,
+`row6_check`, `refusal` - and each row carries the `run_id` that wrote it. Inside the transaction
+for D, `ban_state` takes D's `official` state and the *next trading day's* `forecast` and nothing
+else: the two writes #011 says a run on D makes.
+
+`run_log` is the opposite: it is written *outside* any day transaction and refuses to be written
+inside one (decision 4), because a log entry that rolls back with the day cannot say the day
+failed. Starting a run requires the crash-released `RunLock`; holding it proves no other run is
+alive, so any `RUNNING` row left for D is a crashed run and is marked `ABANDONED` (decision 6).
+
+"Missing" and "not run" are told apart by records, never by a NULL (decision 5): a missing input
+is a `refusal` row inside the day's transaction, and "not run" is the absence of a `COMPLETED`
+row in `run_log`.
 """
 
 from __future__ import annotations
 
 import csv
 import datetime as dt
+import json
+import re
 import sqlite3
-from collections.abc import Iterator, Mapping
+import uuid
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 
 from sentinel.calendar import DayKind, TradingCalendar, UnknownDateError
+from sentinel.engine import Reconciliation, ReductionCheck
+from sentinel.parsers import MwplRow
+from sentinel.runlock import RunLock
 
-__all__ = ["Source", "StateRecord", "WriteResult", "BanStateStore", "StoreError"]
+__all__ = [
+    "Source", "StateRecord", "WriteResult", "BanStateStore", "StoreError",
+    "RunOutcome", "RunRecord", "RefusalStage", "Refusal", "ReconciliationSummary",
+]
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class Source(Enum):
@@ -84,17 +113,100 @@ class StateRecord:
                 f"{self.symbol} ({self.isin}) on {self.trade_date}: source is 'nse' but no "
                 f"official state is recorded. A published fact with no value is not a fact."
             )
-        if not self.isin or self.isin.strip().upper() in {"NA", "NAN", "-"}:
-            raise StoreError(
-                f"{self.symbol} on {self.trade_date}: ISIN is {self.isin!r}. Index rows carry "
-                f"no ISIN and are not stored - MWPL does not apply to them (#011 Q2)."
-            )
+        _check_isin(self.isin, self.symbol, self.trade_date)
         if len(self.input_sha256) != 64:
             raise StoreError(
                 f"{self.symbol} ({self.isin}) on {self.trade_date}: input_sha256 is "
                 f"{self.input_sha256!r}. Every record names the file it came from, so a day can "
                 f"be traced back to the bytes behind it."
             )
+
+
+def _check_isin(isin: str, symbol: str, day: dt.date) -> None:
+    if not isin or isin.strip().upper() in {"NA", "NAN", "-"}:
+        raise StoreError(
+            f"{symbol} on {day}: ISIN is {isin!r}. Index rows carry "
+            f"no ISIN and are not stored - MWPL does not apply to them (#011 Q2)."
+        )
+
+
+class RunOutcome(Enum):
+    """A run's state in `run_log`. Only RUNNING is not final."""
+
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    REFUSED = "REFUSED"          # the whole run refused: combineoi_D missing, or D unknown
+    FAILED = "FAILED"            # it crashed and said so; the day's transaction rolled back
+    ABANDONED = "ABANDONED"      # it crashed without saying so; found later with no lock held
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """One row of `run_log`."""
+
+    run_id: str
+    trade_date: dt.date
+    started_at: str
+    finished_at: str | None
+    outcome: RunOutcome
+    reason: str
+    input_checksums: dict[str, str]
+    code_version: str
+    dirty: bool
+    rules_checksum: str
+    calendar_checksum: str
+    superseded_by: str | None
+
+
+class RefusalStage(Enum):
+    """Which consumer of D's inputs refused (#019 decision 1)."""
+
+    OFFICIAL_STATE = "official_state"
+    FORECAST = "forecast"
+    SCORE = "score"
+    RECONCILIATION = "reconciliation"
+    ROW6 = "row6"
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """A stated refusal: a result, not a failure (#019 decision 3).
+
+    `subject` names what was refused - an ISIN for one scrip's forecast, or "" when the whole
+    stage refused - so "SAIL's forecast refused" and "row 6 refused" are different rows.
+    """
+
+    trade_date: dt.date
+    stage: RefusalStage
+    subject: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise StoreError(
+                f"{self.trade_date} {self.stage.value} {self.subject!r}: a refusal with no reason "
+                f"is the silence it exists to replace."
+            )
+
+
+@dataclass(frozen=True)
+class ReconciliationSummary:
+    """What `reconciliation` stores: the count the report shows, and the range it does not."""
+
+    trade_date: dt.date
+    rows_total: int
+    residual_count: int
+    residual_min: float | None
+    residual_min_symbol: str | None
+    residual_max: float | None
+    residual_max_symbol: str | None
+    barred_count: int
+    barred_held: int
+    failures: tuple[str, ...]
+
+    @property
+    def ok(self) -> bool:
+        return not self.failures
 
 
 @dataclass(frozen=True)
@@ -136,6 +248,91 @@ CREATE TABLE IF NOT EXISTS ban_state (
 
 CREATE INDEX IF NOT EXISTS ban_state_by_date ON ban_state (trade_date);
 CREATE INDEX IF NOT EXISTS ban_state_by_symbol ON ban_state (symbol, trade_date);
+
+-- #019 decision 4. Written outside the day's transaction, so it survives the day rolling back.
+CREATE TABLE IF NOT EXISTS run_log (
+    run_id             TEXT    PRIMARY KEY,
+    trade_date         TEXT    NOT NULL,
+    started_at         TEXT    NOT NULL,
+    finished_at        TEXT,
+    outcome            TEXT    NOT NULL
+                       CHECK (outcome IN ('RUNNING','COMPLETED','REFUSED','FAILED','ABANDONED')),
+    reason             TEXT    NOT NULL DEFAULT '',
+    input_checksums    TEXT    NOT NULL,          -- JSON object, file name -> sha256
+    code_version       TEXT    NOT NULL CHECK (length(code_version) > 0),
+    dirty              INTEGER NOT NULL CHECK (dirty IN (0, 1)),
+    rules_checksum     TEXT    NOT NULL CHECK (length(rules_checksum) = 64),
+    calendar_checksum  TEXT    NOT NULL CHECK (length(calendar_checksum) = 64),
+    superseded_by      TEXT    REFERENCES run_log (run_id),
+    CHECK ((outcome = 'RUNNING') = (finished_at IS NULL)),
+    CHECK ((outcome = 'ABANDONED') = (superseded_by IS NOT NULL)),
+    CHECK (outcome IN ('RUNNING', 'COMPLETED') OR length(reason) > 0)
+);
+CREATE INDEX IF NOT EXISTS run_log_by_date ON run_log (trade_date, started_at);
+
+-- The inputs as published, not utilisation: nothing derived is stored beside its inputs.
+CREATE TABLE IF NOT EXISTS measurement (
+    isin               TEXT    NOT NULL,
+    trade_date         TEXT    NOT NULL,
+    symbol             TEXT    NOT NULL,
+    scrip_name         TEXT    NOT NULL,
+    mwpl               INTEGER NOT NULL CHECK (mwpl > 0),
+    notional_oi        INTEGER NOT NULL CHECK (notional_oi >= 0),
+    futeq_oi           REAL    NOT NULL CHECK (futeq_oi >= 0),
+    no_fresh_positions INTEGER NOT NULL CHECK (no_fresh_positions IN (0, 1)),
+    headroom_shares    INTEGER,
+    input_sha256       TEXT    NOT NULL CHECK (length(input_sha256) = 64),
+    run_id             TEXT    NOT NULL REFERENCES run_log (run_id),
+    written_at         TEXT    NOT NULL,
+    PRIMARY KEY (isin, trade_date)
+) WITHOUT ROWID;
+
+-- Decision 7: the count is what the report shows; the range stays here.
+CREATE TABLE IF NOT EXISTS reconciliation (
+    trade_date          TEXT    PRIMARY KEY,
+    rows_total          INTEGER NOT NULL CHECK (rows_total >= 0),
+    residual_count      INTEGER NOT NULL CHECK (residual_count >= 0),
+    residual_min        REAL,
+    residual_min_symbol TEXT,
+    residual_max        REAL,
+    residual_max_symbol TEXT,
+    barred_count        INTEGER NOT NULL CHECK (barred_count >= 0),
+    barred_held         INTEGER NOT NULL CHECK (barred_held >= 0 AND barred_held <= barred_count),
+    failures            TEXT    NOT NULL,          -- JSON array of strings; empty means ok
+    input_sha256        TEXT    NOT NULL CHECK (length(input_sha256) = 64),
+    run_id              TEXT    NOT NULL REFERENCES run_log (run_id),
+    written_at          TEXT    NOT NULL,
+    CHECK ((residual_count = 0) = (residual_min IS NULL)),
+    CHECK ((residual_count = 0) = (residual_max IS NULL))
+);
+
+-- Row 6, one row per account per banned scrip. Decimals as text, so they come back exact.
+CREATE TABLE IF NOT EXISTS row6_check (
+    trade_date       TEXT    NOT NULL,
+    tm               TEXT    NOT NULL CHECK (length(tm) > 0),
+    ucc              TEXT    NOT NULL CHECK (length(ucc) > 0),
+    isin             TEXT    NOT NULL,
+    yesterday_delta  TEXT    NOT NULL,
+    baseline         TEXT    NOT NULL,
+    today_delta      TEXT    NOT NULL,
+    permitted        INTEGER NOT NULL CHECK (permitted IN (0, 1)),
+    reason           TEXT    NOT NULL CHECK (length(reason) > 0),
+    run_id           TEXT    NOT NULL REFERENCES run_log (run_id),
+    written_at       TEXT    NOT NULL,
+    PRIMARY KEY (trade_date, tm, ucc, isin)
+) WITHOUT ROWID;
+
+-- Decision 5: a missing input is stated here, never left as a NULL somewhere else.
+CREATE TABLE IF NOT EXISTS refusal (
+    trade_date  TEXT    NOT NULL,
+    stage       TEXT    NOT NULL
+                CHECK (stage IN ('official_state','forecast','score','reconciliation','row6')),
+    subject     TEXT    NOT NULL,                  -- an ISIN, or '' for the whole stage
+    reason      TEXT    NOT NULL CHECK (length(reason) > 0),
+    run_id      TEXT    NOT NULL REFERENCES run_log (run_id),
+    written_at  TEXT    NOT NULL,
+    PRIMARY KEY (trade_date, stage, subject)
+) WITHOUT ROWID;
 """
 
 
@@ -149,6 +346,101 @@ class BanStateStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        #: The open day transaction, as (trade_date, run_id), or None.
+        self._txn: tuple[dt.date, str] | None = None
+
+    # -- transactions -----------------------------------------------------------------------
+
+    @contextmanager
+    def _write(self) -> Iterator[None]:
+        """One write. Joins an open day transaction; otherwise is its own transaction.
+
+        Without this, the `with self._conn:` each writer used to open would COMMIT an enclosing
+        day transaction on its way out - the first stage's write would make every later stage's
+        crash leave half a day behind, which is what #019 decision 3 forbids.
+        """
+        if self._txn is not None:
+            yield
+            return
+        with self._conn:
+            self._conn.execute("BEGIN")
+            yield
+
+    @contextmanager
+    def day_transaction(self, day: dt.date, run_id: str) -> Iterator[BanStateStore]:
+        """Everything run `run_id` writes for `day`, committed together or not at all.
+
+        Refuses to nest, refuses a date the calendar cannot vouch for, and refuses a run that is
+        not RUNNING for this same date - so results can only ever be attributed to the run that
+        is alive and computing them.
+        """
+        if self._txn is not None:
+            raise StoreError(
+                f"a day transaction for {self._txn[0]} is already open; one day at a time"
+            )
+        self._check_session(day)
+        run = self.run(run_id)
+        if run.outcome is not RunOutcome.RUNNING or run.trade_date != day:
+            raise StoreError(
+                f"run {run_id} is {run.outcome.value} for {run.trade_date}; results for {day} can "
+                f"only be written by a RUNNING run for {day}"
+            )
+        self._conn.execute("BEGIN IMMEDIATE")
+        self._txn = (day, run_id)
+        try:
+            yield self
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+        finally:
+            self._txn = None
+
+    @property
+    def in_day_transaction(self) -> bool:
+        return self._txn is not None
+
+    def _check_session(self, day: dt.date) -> None:
+        kind = self.calendar.kind(day)
+        if kind is DayKind.UNKNOWN:
+            raise UnknownDateError(
+                f"refusing to store state for {day}: no verified calendar covers it. The "
+                f"calendar is loaded from config/calendar_2026.csv."
+            )
+        if not kind.has_session:
+            raise StoreError(
+                f"refusing to store state for {day}: the verified calendar says it is a "
+                f"{kind.value}. A non-trading day with data is a contradiction - either the "
+                f"calendar is wrong or the file is for another date, and both need a person."
+            )
+
+    def _guard_ban_state(self, day: dt.date, column: str) -> None:
+        """Inside run D's transaction, only D's official state and D+1's forecast may be written."""
+        if self._txn is None:
+            return
+        run_day = self._txn[0]
+        allowed = {"official": run_day, "record": run_day}
+        allowed["forecast"] = self.calendar.next_trading_day(run_day)
+        if allowed[column] != day:
+            raise StoreError(
+                f"the run for {run_day} may write {column} for {allowed[column]} only, not "
+                f"{day}. A run on D stores D's official state and the next trading day's "
+                f"forecast (#011); anything else would be another day's result."
+            )
+
+    def _require_txn(self, day: dt.date) -> str:
+        """Result tables take writes only inside the day transaction for that day."""
+        if self._txn is None:
+            raise StoreError(
+                f"results for {day} are written only inside day_transaction(), so that a crash "
+                f"leaves none of them behind (#019 decision 3)"
+            )
+        if self._txn[0] != day:
+            raise StoreError(
+                f"the open day transaction is for {self._txn[0]}, not {day}"
+            )
+        return self._txn[1]
 
     def close(self) -> None:
         self._conn.close()
@@ -183,18 +475,8 @@ class BanStateStore:
         # A special session's data is real and is stored; whether it CHAINS is a separate
         # question the calendar refuses until verified. That is the whole point of
         # SPECIAL_SESSION being a state rather than a flag.
-        kind = self.calendar.kind(day)
-        if kind is DayKind.UNKNOWN:
-            raise UnknownDateError(
-                f"refusing to store state for {day}: no verified calendar covers it. The "
-                f"calendar is loaded from config/calendar_2026.csv."
-            )
-        if not kind.has_session:
-            raise StoreError(
-                f"refusing to store state for {day}: the verified calendar says it is a "
-                f"{kind.value}. A non-trading day with data is a contradiction - either the "
-                f"calendar is wrong or the file is for another date, and both need a person."
-            )
+        self._check_session(day)
+        self._guard_ban_state(day, "record")
 
         seen: set[str] = set()
         for r in records:
@@ -215,8 +497,7 @@ class BanStateStore:
             for r in records
         ]
         try:
-            with self._conn:
-                self._conn.execute("BEGIN")
+            with self._write():
                 self._conn.executemany(
                     f"{verb} INTO ban_state "
                     "(isin, trade_date, symbol, official, forecast, source, input_sha256, "
@@ -270,16 +551,8 @@ class BanStateStore:
                 f"so a day can be traced back to the bytes behind it."
             )
 
-        kind = self.calendar.kind(day)
-        if kind is DayKind.UNKNOWN:
-            raise UnknownDateError(
-                f"refusing to store state for {day}: no verified calendar covers it."
-            )
-        if not kind.has_session:
-            raise StoreError(
-                f"refusing to store state for {day}: the verified calendar says it is a "
-                f"{kind.value}. A non-trading day with data is a contradiction."
-            )
+        self._check_session(day)
+        self._guard_ban_state(day, column)
 
         existing = {
             r["isin"]: r[column]
@@ -324,8 +597,7 @@ class BanStateStore:
 
         if to_write:
             other = "forecast" if column == "official" else "official"
-            with self._conn:
-                self._conn.execute("BEGIN")
+            with self._write():
                 self._conn.executemany(
                     f"INSERT INTO ban_state "
                     f"(isin, trade_date, symbol, {column}, {other}, source, input_sha256, "
@@ -339,6 +611,259 @@ class BanStateStore:
                     to_write,
                 )
         return WriteResult(day=day, column=column, written=len(to_write), unchanged=unchanged)
+
+    # -- run_log: outside every day transaction (#019 decisions 4 and 6) -------------------
+
+    def start_run(
+        self, trade_date: dt.date, *, lock: RunLock, input_checksums: Mapping[str, str],
+        code_version: str, dirty: bool, rules_checksum: str, calendar_checksum: str,
+    ) -> RunRecord:
+        """Write a RUNNING row for `trade_date`, and abandon any RUNNING row it supersedes.
+
+        Requires the run lock. Holding it proves no other run is alive, so a RUNNING row already
+        there for this date belongs to a run that crashed: it is marked ABANDONED with the time
+        and the new run's id, in the same write as the new row. Nothing else needs cleaning up,
+        because the crashed run's day transaction rolled back with it.
+
+        Deliberately does not ask the calendar: a run for an unknown date must still be able to
+        log that it REFUSED.
+        """
+        self._refuse_inside_txn("start_run")
+        if not lock.held:
+            raise StoreError(
+                "start_run() needs the run lock held. Without it, a RUNNING row cannot be told "
+                "apart from a run that is still alive (#019 decision 6)."
+            )
+        checksums = dict(input_checksums)
+        for name, sha in checksums.items():
+            if not isinstance(sha, str) or not _SHA256.fullmatch(sha):
+                raise StoreError(f"input checksum for {name} is {sha!r}, not a sha256")
+        for label, sha in (("rules_checksum", rules_checksum), ("calendar_checksum", calendar_checksum)):
+            if not _SHA256.fullmatch(sha):
+                raise StoreError(f"{label} is {sha!r}, not a sha256")
+        if not code_version.strip():
+            raise StoreError("code_version is blank; a run that cannot name its code is not reproducible")
+
+        run_id = uuid.uuid4().hex
+        now = _now()
+        with self._write():
+            self._conn.execute(
+                "INSERT INTO run_log (run_id, trade_date, started_at, finished_at, outcome, reason, "
+                " input_checksums, code_version, dirty, rules_checksum, calendar_checksum, "
+                " superseded_by) VALUES (?,?,?,NULL,'RUNNING','',?,?,?,?,?,NULL)",
+                (run_id, trade_date.isoformat(), now, json.dumps(checksums, sort_keys=True),
+                 code_version, int(dirty), rules_checksum, calendar_checksum),
+            )
+            self._conn.execute(
+                "UPDATE run_log SET outcome = 'ABANDONED', finished_at = ?, superseded_by = ?, "
+                " reason = 'found RUNNING with no run lock held: the run crashed' "
+                "WHERE trade_date = ? AND outcome = 'RUNNING' AND run_id != ?",
+                (now, run_id, trade_date.isoformat(), run_id),
+            )
+        return self.run(run_id)
+
+    def finish_run(
+        self, run_id: str, outcome: RunOutcome, reason: str = "", *, lock: RunLock,
+    ) -> RunRecord:
+        """Close a RUNNING run as COMPLETED, REFUSED or FAILED. Called after the day commits or
+        rolls back, never inside it - a FAILED that rolled back with the day would say nothing."""
+        self._refuse_inside_txn("finish_run")
+        if not lock.held:
+            raise StoreError("finish_run() needs the run lock held, as start_run() did")
+        if outcome not in (RunOutcome.COMPLETED, RunOutcome.REFUSED, RunOutcome.FAILED):
+            raise StoreError(f"a run finishes as COMPLETED, REFUSED or FAILED, not {outcome.value}")
+        if outcome is not RunOutcome.COMPLETED and not reason.strip():
+            raise StoreError(f"a {outcome.value} run must say why")
+        run = self.run(run_id)
+        if run.outcome is not RunOutcome.RUNNING:
+            raise StoreError(
+                f"run {run_id} is already {run.outcome.value}; a run finishes once"
+            )
+        with self._write():
+            self._conn.execute(
+                "UPDATE run_log SET outcome = ?, reason = ?, finished_at = ? WHERE run_id = ?",
+                (outcome.value, reason, _now(), run_id),
+            )
+        return self.run(run_id)
+
+    def run(self, run_id: str) -> RunRecord:
+        row = self._conn.execute("SELECT * FROM run_log WHERE run_id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise StoreError(f"no run {run_id} in run_log")
+        return _run_record(row)
+
+    def runs_for(self, trade_date: dt.date) -> tuple[RunRecord, ...]:
+        """Every run for `trade_date`, oldest first, including abandoned and refused ones."""
+        rows = self._conn.execute(
+            "SELECT * FROM run_log WHERE trade_date = ? ORDER BY started_at, run_id",
+            (trade_date.isoformat(),),
+        ).fetchall()
+        return tuple(_run_record(r) for r in rows)
+
+    def last_completed_run(self, trade_date: dt.date) -> RunRecord | None:
+        """The latest COMPLETED run for `trade_date`. None is "not run" in #019's sense."""
+        completed = [r for r in self.runs_for(trade_date) if r.outcome is RunOutcome.COMPLETED]
+        return completed[-1] if completed else None
+
+    def _refuse_inside_txn(self, what: str) -> None:
+        if self._txn is not None:
+            raise StoreError(
+                f"{what}() inside the day transaction for {self._txn[0]}: the run log is written "
+                f"outside it, so that it survives the day rolling back (#019 decision 4)"
+            )
+
+    # -- the result tables: inside the day transaction only (#019 decision 3) -------------
+
+    def record_measurements(self, rows: Iterable[MwplRow], *, input_sha256: str) -> WriteResult:
+        """D's combineoi rows as published: MWPL, FutEq OI, the flag. Not utilisation."""
+        rows = tuple(rows)
+        day = _single_date(rows, "record_measurements")
+        run_id = self._require_txn(day)
+        _check_sha(input_sha256)
+        values = []
+        for r in rows:
+            _check_isin(r.isin, r.symbol, day)
+            values.append({
+                "isin": r.isin, "trade_date": day.isoformat(), "symbol": r.symbol,
+                "scrip_name": r.scrip_name, "mwpl": r.mwpl, "notional_oi": r.notional_oi,
+                "futeq_oi": float(r.futeq_oi), "no_fresh_positions": int(r.no_fresh_positions),
+                "headroom_shares": r.headroom_shares, "input_sha256": input_sha256,
+            })
+        return self._insert_results("measurement", ("isin", "trade_date"), values, day, run_id)
+
+    def record_reconciliation(self, rec: Reconciliation, *, input_sha256: str) -> WriteResult:
+        run_id = self._require_txn(rec.trade_date)
+        _check_sha(input_sha256)
+        lo = min(rec.residuals, key=lambda r: r.residual, default=None)
+        hi = max(rec.residuals, key=lambda r: r.residual, default=None)
+        value = {
+            "trade_date": rec.trade_date.isoformat(), "rows_total": rec.rows_total,
+            "residual_count": len(rec.residuals),
+            "residual_min": None if lo is None else float(lo.residual),
+            "residual_min_symbol": None if lo is None else lo.symbol,
+            "residual_max": None if hi is None else float(hi.residual),
+            "residual_max_symbol": None if hi is None else hi.symbol,
+            "barred_count": len(rec.barred), "barred_held": sum(1 for b in rec.barred if b.held),
+            "failures": json.dumps(list(rec.failures)), "input_sha256": input_sha256,
+        }
+        return self._insert_results("reconciliation", ("trade_date",), [value], rec.trade_date, run_id)
+
+    def record_row6_checks(self, checks: Iterable[ReductionCheck]) -> WriteResult:
+        checks = tuple(checks)
+        day = _single_date(checks, "record_row6_checks")
+        run_id = self._require_txn(day)
+        values = [{
+            "trade_date": day.isoformat(), "tm": c.tm, "ucc": c.ucc, "isin": c.isin,
+            "yesterday_delta": str(c.yesterday_delta), "baseline": str(c.baseline),
+            "today_delta": str(c.today_delta), "permitted": int(c.permitted), "reason": c.reason,
+        } for c in checks]
+        return self._insert_results("row6_check", ("trade_date", "tm", "ucc", "isin"), values,
+                                    day, run_id)
+
+    def record_refusals(self, refusals: Iterable[Refusal]) -> WriteResult:
+        refusals = tuple(refusals)
+        day = _single_date(refusals, "record_refusals")
+        run_id = self._require_txn(day)
+        values = [{
+            "trade_date": day.isoformat(), "stage": f.stage.value, "subject": f.subject,
+            "reason": f.reason,
+        } for f in refusals]
+        return self._insert_results("refusal", ("trade_date", "stage", "subject"), values,
+                                    day, run_id)
+
+    def _insert_results(
+        self, table: str, key: tuple[str, ...], values: list[dict], day: dt.date, run_id: str,
+    ) -> WriteResult:
+        """Insert new rows; an identical row is a no-op; a different one is a conflict.
+
+        The same re-run rule as `ban_state` (#019 decision 11): identical inputs give identical
+        results, and a changed result is a finding to report, never something to overwrite.
+        `run_id` and `written_at` are bookkeeping and are not compared - a clean re-run keeps the
+        first run's attribution, whose input checksums were the same.
+        """
+        seen: set[tuple] = set()
+        to_write, unchanged, conflicts = [], 0, []
+        for v in values:
+            k = tuple(v[c] for c in key)
+            if k in seen:
+                raise StoreError(f"{table}: {dict(zip(key, k))} appears twice in one batch")
+            seen.add(k)
+            prior = self._conn.execute(
+                f"SELECT * FROM {table} WHERE " + " AND ".join(f"{c} = ?" for c in key), k
+            ).fetchone()
+            if prior is None:
+                to_write.append(v)
+            elif all(prior[c] == v[c] for c in v):
+                unchanged += 1
+            else:
+                diff = {c: (prior[c], v[c]) for c in v if prior[c] != v[c]}
+                conflicts.append((dict(zip(key, k)), diff))
+        if conflicts:
+            lines = "\n".join(f"    {k}: stored vs now {d}" for k, d in conflicts[:10])
+            raise StoreError(
+                f"{table} for {day}: {len(conflicts)} row(s) differ from what is stored. A changed "
+                f"result means a changed input, which refuses rather than overwrites (#019 "
+                f"decision 11).\n{lines}"
+            )
+        if to_write:
+            cols = list(to_write[0]) + ["run_id", "written_at"]
+            now = _now()
+            with self._write():
+                self._conn.executemany(
+                    f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                    [tuple(v.values()) + (run_id, now) for v in to_write],
+                )
+        return WriteResult(day=day, column=table, written=len(to_write), unchanged=unchanged)
+
+    # -- reading the result tables, for the report ----------------------------------------
+    #
+    # None or an empty tuple means only "nothing stored". Why - refused, or not run - is in
+    # `refusals()` and `run_log`, which is decision 5.
+
+    def measurements(self, day: dt.date) -> tuple[MwplRow, ...]:
+        """D's stored rows, rebuilt as `MwplRow` so their invariants are checked on the way out."""
+        rows = self._conn.execute(
+            "SELECT * FROM measurement WHERE trade_date = ? ORDER BY symbol", (day.isoformat(),)
+        ).fetchall()
+        return tuple(MwplRow(
+            trade_date=day, isin=r["isin"], scrip_name=r["scrip_name"], symbol=r["symbol"],
+            mwpl=r["mwpl"], notional_oi=r["notional_oi"], futeq_oi=r["futeq_oi"],
+            no_fresh_positions=bool(r["no_fresh_positions"]), headroom_shares=r["headroom_shares"],
+        ) for r in rows)
+
+    def reconciliation(self, day: dt.date) -> ReconciliationSummary | None:
+        r = self._conn.execute(
+            "SELECT * FROM reconciliation WHERE trade_date = ?", (day.isoformat(),)
+        ).fetchone()
+        if r is None:
+            return None
+        return ReconciliationSummary(
+            trade_date=day, rows_total=r["rows_total"], residual_count=r["residual_count"],
+            residual_min=r["residual_min"], residual_min_symbol=r["residual_min_symbol"],
+            residual_max=r["residual_max"], residual_max_symbol=r["residual_max_symbol"],
+            barred_count=r["barred_count"], barred_held=r["barred_held"],
+            failures=tuple(json.loads(r["failures"])),
+        )
+
+    def row6_checks(self, day: dt.date) -> tuple[ReductionCheck, ...]:
+        rows = self._conn.execute(
+            "SELECT * FROM row6_check WHERE trade_date = ? ORDER BY tm, ucc, isin",
+            (day.isoformat(),),
+        ).fetchall()
+        return tuple(ReductionCheck(
+            trade_date=day, tm=r["tm"], ucc=r["ucc"], isin=r["isin"],
+            yesterday_delta=Decimal(r["yesterday_delta"]), baseline=Decimal(r["baseline"]),
+            today_delta=Decimal(r["today_delta"]), permitted=bool(r["permitted"]),
+            reason=r["reason"],
+        ) for r in rows)
+
+    def refusals(self, day: dt.date) -> tuple[Refusal, ...]:
+        rows = self._conn.execute(
+            "SELECT * FROM refusal WHERE trade_date = ? ORDER BY stage, subject",
+            (day.isoformat(),),
+        ).fetchall()
+        return tuple(Refusal(trade_date=day, stage=RefusalStage(r["stage"]), subject=r["subject"],
+                             reason=r["reason"]) for r in rows)
 
     # -- reading. `official` only, by design ----------------------------------------------
 
@@ -443,3 +968,38 @@ class BanStateStore:
         days = self.dates()
         span = f" {days[0]}..{days[-1]}" if days else " empty"
         return f"<BanStateStore {len(days)} day(s){span} at {self.path.name}>"
+
+
+def _now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+
+
+def _check_sha(sha: str) -> None:
+    if not _SHA256.fullmatch(sha):
+        raise StoreError(
+            f"input_sha256 is {sha!r}. Every record names the file it came from, so a day can be "
+            f"traced back to the bytes behind it."
+        )
+
+
+def _single_date(items: tuple, what: str) -> dt.date:
+    if not items:
+        raise StoreError(
+            f"{what}() given nothing. An empty write says nothing; if a stage produced nothing, "
+            f"record why as a refusal (#019 decision 5)."
+        )
+    dates = {i.trade_date for i in items}
+    if len(dates) > 1:
+        raise StoreError(f"{what}() given {len(dates)} dates; one day at a time")
+    return dates.pop()
+
+
+def _run_record(row: sqlite3.Row) -> RunRecord:
+    return RunRecord(
+        run_id=row["run_id"], trade_date=dt.date.fromisoformat(row["trade_date"]),
+        started_at=row["started_at"], finished_at=row["finished_at"],
+        outcome=RunOutcome(row["outcome"]), reason=row["reason"],
+        input_checksums=json.loads(row["input_checksums"]), code_version=row["code_version"],
+        dirty=bool(row["dirty"]), rules_checksum=row["rules_checksum"],
+        calendar_checksum=row["calendar_checksum"], superseded_by=row["superseded_by"],
+    )
