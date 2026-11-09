@@ -10,7 +10,7 @@ Grouped by what each defends:
 * the reason strings, because a person reads them at 18:40 and the same event must always read
   the same way;
 * the three holes found by running the first draft: a missing file passing as flat, a stale
-  yesterday, and the Muhurat chain - all now refused;
+  yesterday, and a chain through an unverified special session - all now refused;
 * the per-UCC scope, including the counterexample that shows it is a scope decision rather than
   a dominance claim.
 
@@ -33,7 +33,7 @@ from sentinel.book import (
     load_books,
     load_delta_factors_by_date,
 )
-from sentinel.calendar import ChainUnverifiedError, load_calendar
+from sentinel.calendar import DEFAULT_CALENDAR_PATH, ChainUnverifiedError, load_calendar
 from sentinel.engine import ReductionCheck, check_ban_period_reduction
 from sentinel.rules import load_rules
 from pathlib import Path
@@ -203,12 +203,32 @@ def test_a_flat_yesterday_is_still_date_checked(rules, calendar):
             fac(TUE, NOV), fac(dt.date(2026, 10, 30), NOV), rules, calendar)
 
 
-def test_muhurat_fails_closed(rules, calendar):
-    """Monday 9 Nov's previous trading day runs through the unverified special session."""
+def test_an_unverified_special_session_fails_closed(rules, tmp_path):
+    """Monday 9 Nov's previous trading day runs through the special session; without the
+    calendar's verdict row the run refuses rather than guessing."""
+    stripped = tmp_path / "calendar_no_verdicts.csv"
+    text = DEFAULT_CALENDAR_PATH.read_text(encoding="utf-8")
+    stripped.write_text("".join(ln for ln in text.splitlines(keepends=True)
+                                if not ln.startswith("chaining_")), encoding="utf-8")
     mon, fri = dt.date(2026, 11, 9), dt.date(2026, 11, 6)
     with pytest.raises(ChainUnverifiedError, match="special session"):
         run(PropBook([fut(mon, "A", 1)]), PropBook([fut(fri, "A", 1)]),
+            fac(mon, NOV), fac(fri, NOV), rules, load_calendar(stripped))
+
+
+def test_with_muhurat_verified_monday_needs_sundays_book(rules, calendar):
+    """The consequence of #013 closing: Sunday chains, so Monday's yesterday is Sunday.
+
+    Friday's book handed in on Monday is now a stale yesterday and is refused - before the
+    verdict it was refused for a different reason (chain unverified). Sunday's book is accepted.
+    """
+    mon, sun, fri = dt.date(2026, 11, 9), dt.date(2026, 11, 8), dt.date(2026, 11, 6)
+    with pytest.raises(BookError, match="previous trading day"):
+        run(PropBook([fut(mon, "A", 1)]), PropBook([fut(fri, "A", 1)]),
             fac(mon, NOV), fac(fri, NOV), rules, calendar)
+    (check,) = run(PropBook([fut(mon, "A", 1)]), PropBook([fut(sun, "A", 1)]),
+                   fac(mon, NOV), fac(sun, NOV), rules, calendar)
+    assert check.permitted and check.reason == "no net change from trading"
 
 
 def test_factors_for_the_wrong_day_are_refused(rules, calendar):

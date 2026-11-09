@@ -6,18 +6,21 @@ Grouped by what each defends:
 * that walking the calendar never steps over an unknown date - the bug this module exists for;
 * the store's invariants, enforced by the schema where possible so no caller has to remember;
 * that there is no way to read a forecast forward as a prior state;
-* two tests that document a limitation rather than a guarantee, including the Muhurat session
-  on 8 Nov 2026, which is a decision still open.
+* special sessions: the Muhurat session on 8 Nov 2026 refuses to chain until a verdict row
+  sourced to its own files says otherwise - which it now does (#013 addendum) - and a session
+  verified NOT to chain is stepped over.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import re
 import sqlite3
 
 import pytest
 
 from sentinel.calendar import (
+    DEFAULT_CALENDAR_PATH,
     CalendarError,
     ChainUnverifiedError,
     DayKind,
@@ -339,38 +342,128 @@ def test_a_special_sessions_data_is_stored(tmp_path):
         assert s.was_in_ban("INE000000001", MUHURAT) is True
 
 
-def test_chaining_through_an_unverified_special_session_refuses():
+FRI6, MON9 = dt.date(2026, 11, 6), dt.date(2026, 11, 9)
+VERDICT_PREFIXES = ("chaining_verified,", "chaining_excluded,")
+
+
+def calendar_file(tmp_path, *extra_rows, keep_verdicts=False):
+    """The real calendar file, with its chaining verdict rows removed unless kept, plus any
+    extra rows. Removing them reproduces the state before 9 Nov, when nothing was verified."""
+    text = DEFAULT_CALENDAR_PATH.read_text(encoding="utf-8")
+    lines = [ln for ln in text.splitlines(keepends=True)
+             if keep_verdicts or not ln.startswith(VERDICT_PREFIXES)]
+    path = tmp_path / "calendar.csv"
+    path.write_text("".join(lines) + "".join(r + "\n" for r in extra_rows), encoding="utf-8")
+    return path
+
+
+OBSERVED = "observed 9 Nov 2026: test_file.csv sha256 " + "b" * 64
+
+
+def test_chaining_through_an_unverified_special_session_refuses(tmp_path):
     """The decision: accept the files, refuse to chain until the chaining is verified.
 
-    A flag on a trading day would have answered "yes, it chains" by default. The open question
-    is whether 8 Nov counts as the previous trading day for the 9th, and nothing has established
-    that yet - so both directions refuse, and Monday's run fails closed rather than resting on
-    a guess.
+    A flag on a trading day would have answered "yes, it chains" by default. Without a verdict
+    row the calendar is back where it was before 9 Nov, and both directions refuse.
     """
-    cal = load_calendar()
-    with pytest.raises(ChainUnverifiedError, match="place in the chain is not verified"):
-        cal.previous_trading_day(dt.date(2026, 11, 9))
+    cal = load_calendar(calendar_file(tmp_path))
+    with pytest.raises(ChainUnverifiedError, match="place in the chain is not\\s+verified"):
+        cal.previous_trading_day(MON9)
     with pytest.raises(ChainUnverifiedError, match="undecided"):
-        cal.next_trading_day(dt.date(2026, 11, 6))
+        cal.next_trading_day(FRI6)
 
 
-def test_a_verified_special_session_chains_normally():
-    """Once observation settles it, the date is passed in and the walk resolves."""
-    cal = load_calendar(chaining_verified=[MUHURAT])
-    assert cal.previous_trading_day(dt.date(2026, 11, 9)) == MUHURAT
-    assert cal.next_trading_day(dt.date(2026, 11, 6)) == MUHURAT
+def test_a_verified_special_session_chains_normally(tmp_path):
+    """The argument adds a verdict on top of the file - the route tests take."""
+    cal = load_calendar(calendar_file(tmp_path), chaining_verified=[MUHURAT])
+    assert cal.previous_trading_day(MON9) == MUHURAT
+    assert cal.next_trading_day(FRI6) == MUHURAT
 
 
-def test_chaining_verified_cannot_name_an_ordinary_day():
+def test_the_project_calendar_says_muhurat_chains():
+    """#013 closed on 9 Nov from 8 Nov's own files: Fri -> Sun -> Mon."""
+    cal = load_calendar()
+    assert MUHURAT in cal.chaining_verified
+    assert cal.previous_trading_day(MON9) == MUHURAT
+    assert cal.next_trading_day(FRI6) == MUHURAT
+    assert cal.previous_trading_day(MUHURAT) == FRI6
+    # it is still not a normal trading day; chaining and is_trading_day are separate questions
+    assert cal.is_trading_day(MUHURAT) is False
+
+
+def test_the_verdict_names_its_files_and_their_checksums_match_reading():
+    """The verdict's source must be an observation a reader can re-check, and the two
+    checksums it quotes must be the ones recorded for those files in docs/READING.md."""
+    evidence = load_calendar().chaining_evidence[MUHURAT]
+    assert evidence.startswith("observed")
+    assert "NSE/FAOP" not in evidence, "a chaining verdict cites files, not the circular"
+    reading = (DEFAULT_CALENDAR_PATH.parents[1] / "docs" / "READING.md").read_text(encoding="utf-8")
+    for name in ("combineoi_08112026.zip", "fo_secban_08112026.csv"):
+        quoted = re.search(re.escape(name) + r" sha256 ([0-9a-f]{64})", evidence)
+        assert quoted, f"{name} and its sha256 are not in the verdict's source"
+        recorded = re.search(r"\| `" + re.escape(name) + r"` \| [\d,]+ \| `([0-9a-f]{64})` \|",
+                             reading)
+        assert recorded, f"{name} has no row in READING.md's checksum table"
+        assert quoted.group(1) == recorded.group(1)
+
+
+def test_a_session_verified_not_to_chain_is_stepped_over(tmp_path):
+    """The state that exists before it is needed: files stored, walk steps over it."""
+    path = calendar_file(tmp_path, f"chaining_excluded,special_session,2026-11-08,{OBSERVED}")
+    cal = load_calendar(path)
+    assert cal.previous_trading_day(MON9) == FRI6
+    assert cal.next_trading_day(FRI6) == MON9
+    assert cal.has_session(MUHURAT) is True        # its data is still real and storable
+    with BanStateStore(tmp_path / "s.sqlite", cal) as s:
+        s.record_day((rec(day=FRI6, official=True),))
+        s.record_day((rec(day=MUHURAT, official=False),))
+        # Monday's seed comes from Friday (banned), past the excluded Sunday (not banned)
+        assert s.seed_for(MON9) == frozenset({"INE000000001"})
+
+
+def test_the_same_session_cannot_both_chain_and_not_chain(tmp_path):
+    with pytest.raises(CalendarError, match="both as chaining and as not chaining"):
+        load_calendar(calendar_file(
+            tmp_path, f"chaining_excluded,special_session,2026-11-08,{OBSERVED}"),
+            chaining_verified=[MUHURAT])
+    with pytest.raises(CalendarError, match="already has a chaining verdict"):
+        load_calendar(calendar_file(
+            tmp_path,
+            f"chaining_verified,special_session,2026-11-08,{OBSERVED}",
+            f"chaining_excluded,special_session,2026-11-08,{OBSERVED}"))
+
+
+@pytest.mark.parametrize("source", [
+    "NSE/FAOP/71777 ref 212/2025",                        # a circular, not an observation
+    "observed 9 Nov 2026: the files looked fine",          # an observation nobody can re-check
+    "",
+])
+def test_a_verdict_must_be_sourced_to_checksummed_files(tmp_path, source):
+    path = calendar_file(tmp_path, f"chaining_verified,special_session,2026-11-08,{source}")
+    with pytest.raises(CalendarError, match="must begin `observed`"):
+        load_calendar(path)
+
+
+def test_a_verdict_row_is_checked_like_any_other(tmp_path):
+    with pytest.raises(CalendarError, match="not a date"):
+        load_calendar(calendar_file(tmp_path, f"chaining_verified,special_session,8 Nov,{OBSERVED}"))
+    with pytest.raises(CalendarError, match="must have kind special_session"):
+        load_calendar(calendar_file(tmp_path, f"chaining_verified,holiday,2026-11-08,{OBSERVED}"))
+
+
+def test_chaining_verified_cannot_name_an_ordinary_day(tmp_path):
     # Only a special session has chaining to verify; naming a Tuesday would be meaningless and
     # would quietly suggest the mechanism applies more widely than it does.
     with pytest.raises(CalendarError, match="not special sessions"):
-        load_calendar(chaining_verified=[dt.date(2026, 11, 9)])
+        load_calendar(chaining_verified=[MON9])
+    with pytest.raises(CalendarError, match="chaining_excluded names"):
+        load_calendar(calendar_file(
+            tmp_path, f"chaining_excluded,special_session,2026-11-09,{OBSERVED}"))
 
 
 def test_the_store_refuses_a_special_session_whose_seed_would_need_chaining(tmp_path):
     """The two halves together: the data goes in, the seed for the next day does not come out."""
-    cal = load_calendar()
+    cal = load_calendar(calendar_file(tmp_path))
     with BanStateStore(tmp_path / "s.sqlite", cal) as s:
         s.record_day((rec(day=MUHURAT, official=True),))
         with pytest.raises(ChainUnverifiedError):

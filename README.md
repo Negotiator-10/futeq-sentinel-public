@@ -90,10 +90,11 @@ Stated plainly, because the thing above is the only claim I want read as finishe
 * **Acquisition is manual.** NSE returns 403 to a plain HTTP client and tarpits its archive
   paths, so every file in this repository's `data/` was downloaded by hand with its checksum
   recorded. There is no downloader yet (`DECISIONS.md` #010).
-* **One decision is deliberately left failing closed.** Muhurat trading on Sunday 8 November
-  2026 is a session on a day that is not a normal trading day. Whether it counts as the previous
-  trading day for Monday's ban state has not been established, so the calendar refuses to chain
-  through it and Monday's run will not seed until it is settled (#013).
+* **Special sessions chain only on evidence.** Muhurat trading on Sunday 8 November 2026 is a
+  session on a day that is not a normal trading day. The calendar refused to chain through it
+  until 9 November, when NSE's own Sunday files showed a full end-of-day cycle; it is now
+  recorded as chaining, sourced to those files and their checksums rather than to a circular
+  (#013 addendum). Any other special session refuses until it has a verdict of its own.
 
 ## Running it
 

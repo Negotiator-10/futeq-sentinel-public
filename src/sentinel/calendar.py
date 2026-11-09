@@ -21,6 +21,11 @@ holiday and says in the same breath that "Muhurat Trading will be conducted" tha
 timings "notified subsequently" - the exchange had not settled the session's shape when it
 published the calendar.
 
+Settled 9 Nov from the session's own files: 8 Nov chains. The verdict is a `chaining_verified`
+row in the calendar file, sourced to those files and their checksums - an observation, kept
+apart from the circular rows. A `chaining_excluded` row records the opposite verdict, which no
+date needs yet.
+
 The reason this module exists at all is a bug. `scripts/score_bans.py` originally took "the
 next trading day" to mean "the next date for which a file happens to be on disk". Hide one ban
 list and it scored 14 Oct's forecast against 16 Oct's published list, skipped the 15th
@@ -94,8 +99,9 @@ class ChainUnverifiedError(Exception):
 
     Deliberately distinct from `UnknownDateError`: the date is not unknown, the calendar knows
     exactly what it is. What is unknown is whether it counts as the previous or next trading
-    day, and that question is settled by observing NSE's next published ban list, not by
-    picking a convenient answer.
+    day, and that question is settled by observing the session's own end-of-day files, not by
+    picking a convenient answer. (The ban lists alone may not discriminate: on 6, 8 and 9 Nov
+    2026 they were identical, so both answers predicted them. See #013 addendum.)
     """
 
 
@@ -112,6 +118,8 @@ class TradingCalendar:
         *,
         source: str = "",
         chaining_verified: frozenset[dt.date] = frozenset(),
+        chaining_excluded: frozenset[dt.date] = frozenset(),
+        chaining_evidence: Mapping[dt.date, str] | None = None,
     ) -> None:
         unknown_written = [d for d, k in days.items() if k is DayKind.UNKNOWN]
         if unknown_written:
@@ -120,16 +128,31 @@ class TradingCalendar:
                 f"{min(unknown_written)}. UNKNOWN is the absence of a record, not a record - "
                 f"writing it down makes an unverified date look verified."
             )
-        stray = sorted(d for d in chaining_verified if days.get(d) is not DayKind.SPECIAL_SESSION)
-        if stray:
+        for label, dates in (("chaining_verified", chaining_verified),
+                             ("chaining_excluded", chaining_excluded)):
+            stray = sorted(d for d in dates if days.get(d) is not DayKind.SPECIAL_SESSION)
+            if stray:
+                raise CalendarError(
+                    f"{label} names {len(stray)} date(s) that are not special sessions, "
+                    f"starting {stray[0]}. Only a special session has chaining to verify."
+                )
+        both = sorted(set(chaining_verified) & set(chaining_excluded))
+        if both:
             raise CalendarError(
-                f"chaining_verified names {len(stray)} date(s) that are not special sessions, "
-                f"starting {stray[0]}. Only a special session has chaining to verify."
+                f"{both[0]} is recorded both as chaining and as not chaining. One observation is "
+                f"wrong, and picking a winner would hide which."
             )
         self._days = dict(days)
         self.source = source
-        #: Special sessions whose place in the chain has been established by observation.
+        #: Special sessions observed to be a link in the chain: the walk stops on them.
         self.chaining_verified = frozenset(chaining_verified)
+        #: Special sessions observed NOT to be a link: their files are real and stored, but the
+        #: walk steps over them as it does a holiday. No date is here yet - the state exists so
+        #: that the first special session that does not chain has somewhere to go other than a
+        #: hand-edit to the walk, the same reason NoPriorDay was decided before the first run.
+        self.chaining_excluded = frozenset(chaining_excluded)
+        #: Where each of those verdicts came from - an observation, never a circular.
+        self.chaining_evidence = dict(chaining_evidence or {})
 
     # -- what the calendar knows ----------------------------------------------------------
 
@@ -194,8 +217,10 @@ class TradingCalendar:
         scored against the wrong day's published answer.
 
         Refuses on an unverified `SPECIAL_SESSION` for the same reason in a different coat -
-        whether 8 Nov 2026 is the previous trading day for the 9th is not yet established, and
-        guessing would make every ban state after it rest on the guess.
+        whether a special session is the previous trading day for the next one has to be
+        established by observation, and guessing would make every ban state after it rest on
+        the guess. 8 Nov 2026 was settled on 9 Nov from its own files: it chains (#013).
+        A session in `chaining_excluded` is stepped over like a holiday.
         """
         return self._walk(day, +1)
 
@@ -221,15 +246,19 @@ class TradingCalendar:
                     f"from {day} cannot be established. Skipping it would silently move the "
                     f"answer by a day."
                 )
-            if k is DayKind.SPECIAL_SESSION and cursor not in self.chaining_verified:
-                raise ChainUnverifiedError(
-                    f"{cursor} is a special session and its place in the chain is not verified, "
-                    f"so the {direction} trading day from {day} is undecided. Settle it by "
-                    f"checking whether NSE's ban list for the following session carries that "
-                    f"day's state forward, then record it in DECISIONS.md #012 and pass the "
-                    f"date in chaining_verified."
-                )
-            if k is DayKind.TRADING or (k is DayKind.SPECIAL_SESSION and cursor in self.chaining_verified):
+            if k is DayKind.SPECIAL_SESSION:
+                if cursor in self.chaining_verified:
+                    return cursor
+                if cursor not in self.chaining_excluded:
+                    raise ChainUnverifiedError(
+                        f"{cursor} is a special session and its place in the chain is not "
+                        f"verified, so the {direction} trading day from {day} is undecided. "
+                        f"Settle it by observing that session's own end-of-day files, then add a "
+                        f"chaining_verified or chaining_excluded row to the calendar file with "
+                        f"the files and their checksums as its source (DECISIONS.md #013)."
+                    )
+                # verified not to chain: step over it, as over a holiday
+            elif k is DayKind.TRADING:
                 return cursor
             cursor += dt.timedelta(days=step)
         raise UnknownDateError(
@@ -248,6 +277,7 @@ class TradingCalendar:
         special_sessions: Iterable[dt.date] = (),
         source: str = "",
         chaining_verified: Iterable[dt.date] = (),
+        chaining_excluded: Iterable[dt.date] = (),
     ) -> TradingCalendar:
         """Build from explicit lists. A date in more than one list is a contradiction."""
         trading, holiday, special = set(trading_days), set(holidays), set(special_sessions)
@@ -265,7 +295,12 @@ class TradingCalendar:
         days: dict[dt.date, DayKind] = {d: DayKind.TRADING for d in trading}
         days.update({d: DayKind.HOLIDAY for d in holiday})
         days.update({d: DayKind.SPECIAL_SESSION for d in special})
-        return cls(days, source=source, chaining_verified=frozenset(chaining_verified))
+        return cls(
+            days,
+            source=source,
+            chaining_verified=frozenset(chaining_verified),
+            chaining_excluded=frozenset(chaining_excluded),
+        )
 
 
 def load_calendar(
@@ -288,6 +323,18 @@ def load_calendar(
     Weekends are holidays by rule rather than by the circular, which lists only the weekend
     dates that carry a named holiday. The Muhurat Sunday is exactly why the file must be able
     to override that rule: 8 Nov 2026 is a Sunday with a session.
+
+    **Chaining verdicts are meta rows too**, `chaining_verified` or `chaining_excluded` in the
+    date column and the special session's date in the description. They are the only rows not
+    sourced from a circular - no circular says whether a Muhurat session chains - so the loader
+    holds them to a different rule: the source must begin `observed` and must carry a sha256,
+    because an observation that cannot be re-checked against its files is not evidence. A
+    source written the way the circular rows are written is refused, which keeps the two kinds of
+    row apart in the file rather than only in the reader's head. (The check is on the shape of
+    the source - `observed` and a checksum - not on its truth; the checksums are re-checked
+    against `docs/READING.md` by a test.)
+
+    The `chaining_verified` argument adds dates on top of the file's rows; tests use it.
     """
     path = Path(path) if path is not None else DEFAULT_CALENDAR_PATH
     if not path.is_file():
@@ -295,12 +342,38 @@ def load_calendar(
 
     years: set[int] = set()
     exceptions: dict[dt.date, tuple[DayKind, str]] = {}
+    verdicts: dict[str, set[dt.date]] = {"chaining_verified": set(), "chaining_excluded": set()}
+    evidence: dict[dt.date, str] = {}
     with path.open(encoding="utf-8", newline="") as fh:
         for lineno, rec in enumerate(csv.DictReader(fh), start=2):
             if not rec.get("date", "").strip():
                 continue
             if rec["date"].strip() == "year_covered":
                 years.add(int(rec["description"].strip()))
+                continue
+            if rec["date"].strip() in verdicts:
+                label = rec["date"].strip()
+                where = f"{path} line {lineno}: {label}"
+                if rec["kind"].strip() != DayKind.SPECIAL_SESSION.value:
+                    raise CalendarError(f"{where} must have kind special_session")
+                try:
+                    session = dt.date.fromisoformat(rec["description"].strip())
+                except ValueError as exc:
+                    raise CalendarError(
+                        f"{where}: description {rec['description']!r} is not a date"
+                    ) from exc
+                source = rec.get("source", "").strip()
+                if not source.lower().startswith("observed") or "sha256" not in source.lower():
+                    raise CalendarError(
+                        f"{where} for {session}: the source must begin `observed` and name the "
+                        f"files with their sha256. A chaining verdict is a finding from NSE's "
+                        f"own end-of-day files, not a line from a circular, and a reader must be "
+                        f"able to tell the two apart and re-check it."
+                    )
+                if session in evidence:
+                    raise CalendarError(f"{where}: {session} already has a chaining verdict")
+                verdicts[label].add(session)
+                evidence[session] = source
                 continue
             try:
                 day = dt.date.fromisoformat(rec["date"].strip())
@@ -357,5 +430,7 @@ def load_calendar(
     return TradingCalendar(
         days,
         source=f"{path.name} ({'; '.join(sources)})",
-        chaining_verified=frozenset(chaining_verified),
+        chaining_verified=frozenset(verdicts["chaining_verified"] | set(chaining_verified)),
+        chaining_excluded=frozenset(verdicts["chaining_excluded"]),
+        chaining_evidence=evidence,
     )

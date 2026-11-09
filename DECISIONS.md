@@ -696,6 +696,70 @@ the calendar comes from, and that turned out to matter more than the store itsel
   chaining of Sun 8 Nov, which Monday's run will refuse until observed. Also open: the ban-list
   half of the clearing question, and whether NSE amends the 2026 circular.
 
+### #013 addendum: Sunday 8 Nov chains, 9 Nov 2026
+<!-- Authorship. Claude ran the check against the five files and pointed out the state the
+     calendar was missing. Accepting the conclusion, requiring the verdict to be sourced to the
+     files rather than to a circular, and building the missing state before it is needed are
+     mine. -->
+
+- **The question point 3 left open is closed: the Muhurat session is a link in the chain.**
+  Friday 6 Nov -> Sunday 8 Nov -> Monday 9 Nov. Monday's previous trading day is Sunday, and
+  Sunday's is Friday.
+
+- **The test point 3 planned did not discriminate, and I am recording that rather than quietly
+  swapping it.** The plan was to see whether Monday's ban list carried Sunday's state forward.
+  But the three lists are identical - KAYNES alone on 6, 8 and 9 Nov - and with no transition
+  over the weekend, "Sunday chains" and "Sunday is skipped" predict exactly the same lists. They
+  are consistent with chaining and are not the evidence for it.
+
+- **The evidence is that NSE ran a full end-of-day cycle on Sunday:**
+  - `combineoi_08112026.zip` and `fo_secban_08112026.csv` exist, and both are dated
+    `08-NOV-2026` inside, not only in the file name;
+  - FutEq OI differs from Friday's on 218 of 218 scrips, same scrip set, so Sunday was measured
+    rather than copied; MWPL is unchanged on all of them;
+  - "Limit for Next Day" equals floor(0.95 x MWPL - FutEq OI) on 217 of 217 scrips, computed
+    from Sunday's OI, with KAYNES on "No Fresh Positions".
+
+  A day whose close sets the next day's limits is, by definition, the previous day for the next
+  one. One wording correction from the summary I first agreed: the file never names the date its
+  "Limit for Next Day" applies to, so "declared for 9 Nov" was an inference from the calendar,
+  not something the file says. The calendar row records what the file shows.
+
+- **How it is recorded.** Not as a test argument, which is what point 3 said and which would
+  have left the fact living nowhere the pipeline reads. It is a meta row in
+  `config/calendar_2026.csv`, the same pattern as `year_covered`:
+
+      chaining_verified,special_session,2026-11-08,observed 9 Nov 2026 (not a circular): ...
+
+  Its source names both files with their full sha256 and the three facts above. **It must be
+  distinguishable from the circular-sourced rows, and the loader enforces that**: a verdict row
+  whose source does not begin `observed` and carry a sha256 is refused. A finding from data and
+  a line from a circular are different kinds of authority, and the file now says which is which.
+  A test checks that the two checksums the row quotes are the ones `docs/READING.md` records for
+  those files, so the row cannot drift from the table.
+
+- **The gap, closed before it is needed.** Until today the calendar could say a special session
+  was unverified (refuse) or verified (stop on it). It could not say "verified, and it does
+  **not** chain" - a session whose files are real but which the next day's state skips over. No
+  date needs that today. But the first time one does, the only way to express it would have
+  been to edit the walk under deadline, which is how a rule gets bent to fit the day. So the
+  state exists now, the same way `NoPriorDay` was decided before the first run needed it: a
+  `chaining_excluded` row, same source rule, which stores the session's files and steps over it
+  like a holiday. A session cannot be both; that is refused rather than resolved by precedence.
+
+- **What changes downstream.** Row 6 on Monday now needs **Sunday's** book as yesterday.
+  Friday's book handed in on Monday is refused as stale - before today it was refused for a
+  different reason (chain unverified). A test pins both halves.
+
+- **Evidence:** the five files and checksums are in `docs/READING.md`. 9 new tests; three old
+  ones now strip the verdict row to reproduce the pre-9-Nov state, since the real calendar no
+  longer refuses. Five mutations, all caught: an excluded session treated as unverified, an
+  excluded session treated as a link, the loader ignoring verdict rows, the loader accepting any
+  source, and one checksum digit changed in the row. Suite 342 to 351.
+
+- **Still open:** this is one special session observed once. It says nothing about a Muhurat
+  session in another year, which gets its own row from its own files or refuses.
+
 ## #014: Expiry in the ban-period baseline, 7 Nov 2026
 <!-- Authorship. The rule, the physical-settlement reasoning and all seven predicted outcomes
      are mine, worked out on 7 Nov when Claude's expiry demonstration showed the baseline

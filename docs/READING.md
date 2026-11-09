@@ -208,6 +208,11 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `combineoi_02112026.zip` | 22,219 | `853823d6981505551cda3f57b3d5c59e27ed69678732f2fd58df7ff569f79889` |
 | `BhavCopy_NSE_FO_0_0_0_20261027_F_0000.csv.zip` | 1,366,893 | `c086dbd47763ef7399dcb1b8dedb5c2396a04f36949fded8f42e641f0919d316` |
 | `BhavCopy_NSE_FO_0_0_0_20261029_F_0000.csv.zip` | 1,030,948 | `cb2dc239fad84efa1977c4925b3f0c4882fc8e94426dc94e9bb73cc608de7054` |
+| `fo_secban_06112026.csv` | 55 | `97eb2de4aa066b5923d5a79530ddf8095d4dfcb4b0b97ff81363398b48bea72d` |
+| `fo_secban_08112026.csv` | 55 | `34b68cb999f6c66dd77274242ab8a478532e4133b17d39b0d083da2bcd2ce042` |
+| `fo_secban_09112026.csv` | 55 | `b0aa285238c3dd954f7ab5984969bd59c3bba1316a0986e560479c97bac2b3ce` |
+| `combineoi_06112026.zip` | 22,285 | `f3be2b174de74e48e641618719c496cff3d5fde6e49f386a56a181683316ea84` |
+| `combineoi_08112026.zip` | 22,249 | `778bb013279b1f3356a5b60d7515369ecbe0a075d8c368d895be3344106fe1d6` |
 
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
@@ -462,6 +467,29 @@ non-publication would have shown up here, which is why it is acted on, but it is
 a rule. The ban-list half is untested; `fo_secban` is served from `/archives/fo/sec_ban/` - the
 F&O segment rather than the clearing corporation - and the segment was open that day, which is
 reasoning and not a file. `fo_secban_26082026.csv` would close it for 62 bytes.
+
+### The Muhurat session chains (observed 9 Nov 2026)
+
+The circular says a session happens on Sunday 8 Nov; it does not say whether that session is the
+previous trading day for Monday 9 Nov. I settled it from NSE's own end-of-day files for Friday
+6 Nov, Sunday 8 Nov and Monday 9 Nov (the last five rows of the checksum table above):
+
+* **The Sunday files exist, and are dated Sunday inside.** `combineoi_08112026.zip` carries
+  `08-NOV-2026` on every row; `fo_secban_08112026.csv` is headed "For Trade Date 08-NOV-2026".
+* **Sunday was measured, not copied.** FutEq OI differs from Friday's on 218 of 218 scrips, with
+  the same scrip set. MWPL is unchanged on all of them, as it should be inside a quarter.
+* **Sunday's limits were recomputed from Sunday's OI.** "Limit for Next Day" equals
+  floor(0.95 x MWPL - FutEq OI) on 217 of 217 scrips, and KAYNES carries "No Fresh Positions".
+  The file names no date for that limit; that the next session is 9 Nov is the calendar's
+  inference, not something the file says.
+
+**What did not discriminate:** the three ban lists are identical - KAYNES alone on 6, 8 and
+9 Nov - so with no transition over the weekend, "Sunday chains" and "Sunday is skipped" predict
+the same lists. The lists are consistent with chaining; they are not the evidence for it. The
+evidence is that NSE ran a full end-of-day cycle on Sunday, which is what a link in the chain is.
+
+Recorded as a `chaining_verified` row in `config/calendar_2026.csv`, sourced to these files and
+their checksums, and in `DECISIONS.md` #013.
 
 ## `combineoi_<ddmmyyyy>.zip` — MWPL and utilisation, per single stock
 Archive of a CSV and an XML with the same 218 records. **Use the CSV.** The XML is not

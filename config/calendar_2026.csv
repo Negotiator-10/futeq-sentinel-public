@@ -16,6 +16,7 @@ year_covered,holiday,2026,NSE/FAOP/71777 ref 212/2025 dated 12 Dec 2025 - notifi
 2026-10-02,holiday,Mahatma Gandhi Jayanti,NSE/FAOP/71777 ref 212/2025
 2026-10-20,holiday,Dussehra,NSE/FAOP/71777 ref 212/2025
 2026-11-08,special_session,Diwali Laxmi Pujan (Sunday) - Muhurat Trading; timings notified separately,NSE/FAOP/71777 ref 212/2025 - "Muhurat Trading will be conducted on Sunday November 08 2026"
+chaining_verified,special_session,2026-11-08,observed 9 Nov 2026 (not a circular): combineoi_08112026.zip sha256 778bb013279b1f3356a5b60d7515369ecbe0a075d8c368d895be3344106fe1d6 and fo_secban_08112026.csv sha256 34b68cb999f6c66dd77274242ab8a478532e4133b17d39b0d083da2bcd2ce042 - both exist and are dated 08-NOV-2026 inside; FutEq OI moved on 218/218 scrips against 6 Nov; MWPL unchanged; Limit for Next Day recomputed from 8 Nov OI on 217/217 (KAYNES No Fresh Positions) - the file names no date for that limit and 9 Nov as the next session is the calendar's inference; DECISIONS.md #013
 2026-11-10,holiday,Diwali-Balipratipada,NSE/FAOP/71777 ref 212/2025
 2026-11-24,holiday,Prakash Gurpurb Sri Guru Nanak Dev,NSE/FAOP/71777 ref 212/2025
 2026-12-25,holiday,Christmas,NSE/FAOP/71777 ref 212/2025
