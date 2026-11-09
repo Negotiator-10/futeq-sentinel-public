@@ -1180,3 +1180,24 @@ corporates 20%; that sub-category 10%. `config/rules.yaml` already carried all s
   READING.md checksum changed. The first two are the point: each half of the band catches a
   different lazy engine, which is why both had to be fixtures.
 - **Outcome:** accepted, 9 Nov 2026. Still open: the first fixture set has no builder in the repo.
+
+## #018: v0.1 scope cut, 9 Nov 2026
+
+- **What:** the pipeline runner moves into v0.1; row 7 (`check_entity_limit()`) moves to
+  Week 3; the file watcher and the break workflow move to v1.0.
+- **Why:** correctness work (calendar, Muhurat, expiry, flat days, keying) took precedence
+  over features. v0.1 ships as an engine that runs a day, not a set of functions.
+- **Evidence:** Week 2 as planned against what exists on 9 Nov:
+  - D1 file and deadline watcher: not built.
+  - D2 point-in-time store: done, with the calendar and ingest. The hash manifest is not:
+    the checksum table in `docs/READING.md` is still pasted by hand.
+  - D3 reconciliation of positions: partly. The prop book and row 6 are done; row 7 has its
+    reference tables but not the check.
+  - D4 break workflow: not built.
+  - D5 pipeline runner: not built.
+
+  The time went to work the plan did not have: the four-state calendar and Muhurat chaining
+  (#013), the expiry rule (#014), the flat-day marker (#015), row 7's design and (tm, ucc)
+  keying (#016), and SAIL's scoring and fixtures (#017).
+- **Outcome:** accepted, 9 Nov 2026. Recorded in `PLAN.md` under Week 2. Row 7's design is
+  complete, so only its implementation waits.

@@ -175,6 +175,42 @@ I now have an honest version of my headline result and a dishonest one,
 and I said both out loud within 24 hours. The dishonest one is the one
 that comes out under pressure, so that's the one to practise against.
 
+## 8–9 Nov 2026
+
+### What I learned
+
+**1. Evidence that fits both answers isn't evidence.**
+The Muhurat question was whether Sunday 8 Nov counts as a link in the
+ban chain. The plan was to compare the ban lists, but all three
+(6, 8 and 9 Nov) were KAYNES only. That result fits "Sunday chains" and
+"Sunday is skipped" equally well, so it couldn't decide anything.
+What settled it was a measurement: FutEq OI changed on 218 of 218 scrips
+between Friday and Sunday, with MWPL unchanged, and NSE ran a full
+end-of-day cycle for Sunday. A copied file couldn't do that.
+*Changes:* before running a check, I ask "would this come out the same
+under both answers?" If yes, I look for something that differs between
+them instead.
+
+**2. The 101 in-band days test my logic better than 3241/3241.**
+A model that always says "not banned" would score 99.04%, so most of
+3241/3241 is quiet stocks staying quiet. The 101 scrip-days that closed
+between 80% and 95% are the only ones where yesterday's state decides
+the answer: 27 were held because they were already banned, 74 stayed
+out because they weren't. A single 95% line would have released the 27;
+a single 80% line would have banned the 74. The engine got all 101 right.
+SAIL shows it in one stock: 80.51% on 4 Nov and held, 82.79% on 6 Nov
+and free, higher on the day it stayed out.
+*Changes:* I lead with the in-band result and the transitions, and give
+the headline score only alongside the "never banned" baseline.
+
+**3. Check the data I already have before predicting new data.**
+I expected SAIL to be released on 3 Nov. The 2 Nov file already said no:
+SAIL was at 84.70%, inside the band and already banned, so it had to be
+held. NSE's own No Fresh Positions flag for SAIL said the same. The
+release actually came on 6 Nov, after SAIL closed at 79.52% on 5 Nov.
+*Changes:* before asking for new files, I read what the files on disk
+already say about the question.
+
 ## Gaps list
 Questions from teach-backs that need more work. Strike them out once you can answer them
 without notes.

@@ -248,3 +248,75 @@ result for v0.1 on Wed 11 Nov.
 Still mine and still not done: `LEARNING.md` in my own words with its two blank sections, the
 four interview questions from today, `SPEC.md` rows 4 and 5, `PLAN.md` W2's runner design, and
 the teach-back.
+
+## 7 Nov 2026 (Sat)
+
+- **Trading calendar, four states** (#013). Built from NSE's F&O holiday
+  circular NSE/FAOP/71777, acquired and checksummed, not typed by hand.
+  States: TRADING, HOLIDAY, UNKNOWN, SPECIAL_SESSION. A missing file is
+  judged against the calendar, never inferred from what's on disk.
+  20 Oct confirmed as Dussehra; 27 Oct is a trading day: its first 404
+  was transient, and the file is on disk.
+- **Clearing-holiday check.** combineoi is published on 26 Aug, a clearing
+  holiday, which settled the question from the data rather than the
+  pasted list. n=1, and the ban-list half is untested.
+- **Store and ingest wired.** Point-in-time store in SQLite, keyed
+  (ISIN, trade_date), holding the engine's forecast and NSE's official
+  state separately; only official state feeds the next day.
+- **Transition fixtures (option C).** Transition scrips plus in-band
+  controls (MANAPPURAM, INOXWIND): about 10 KB, 51 rows and 15 ban
+  lists. (4.2 KB was the planning estimate.)
+- **Expiry rule** (#014). Stock expiries fall on Tuesday, moved earlier
+  for a holiday. A contract with expiry < today contributes zero to the
+  baseline: physically settled, so its delta vanished passively.
+  Consequence: rolling on or before expiry is permitted; re-entering the
+  day after is a breach.
+- **Prop book against SEBI 2025/79 Table 2.** Positions per contract;
+  FutEq delta in shares from NSE's Contract_Delta factors, no prices.
+  Review found six issues, all fixed: silent blank-row skips, float
+  arithmetic (now Decimal, exact), lost docstring names, strike parsing,
+  duplicated loaders, and the expiry-day crash.
+
+## 8 Nov 2026 (Sun)
+
+- **Flat day as a marker row** (#015). A FLAT row stating the date is the
+  only way to get an empty book (PropBook.flat). A missing file is never
+  a book, so it can't pass as flat; `books[day]` raises instead.
+- **check_ban_period_reduction(), written twice.** First version got
+  every Table 2 verdict right but had three faults: a false claim that
+  per-UCC checks dominate entity checks, None hiding a missing file, and
+  no check that yesterday was the previous trading day. Rewritten with
+  required books, the calendar check, both band limits in rules.yaml,
+  and readable reasons. Muhurat fails closed through the calendar.
+- **Row 7 walk: five decisions** (#016). Cat II split into two named
+  categories (NSE FAQ 15 files Cat II corporates at the wrong limit);
+  net within UCC, gross across UCCs (inference; four sources, the fourth
+  contradicted, doubts.md 12); the
+  function aggregates, not the caller; an MWPL-driven breach is reported
+  with cause PASSIVE; every check returned with excess in shares.
+- **Reference tables.** Holders (with category) and accounts (keyed
+  (tm, ucc)), date-effective, with cross-table invariants.
+- **Positions keyed on (tm, ucc).** Each broker numbers its own clients,
+  so C001 at two brokers is two people. Row 6 now checks per account.
+
+## 9 Nov 2026 (Mon)
+
+- **Muhurat chains** (#013 addendum). Sunday 8 Nov was a real session:
+  FutEq OI moved on 218/218 scrips with MWPL unchanged, and NSE ran a
+  full end-of-day cycle. Recorded as a calendar row sourced to the two
+  Sunday files and their checksums, marked as an observation, not a
+  circular. Added the "verified, does not chain" state for future use.
+- **SAIL scored.** 3241/3241 scrip-days agree; 8 of 8 transitions
+  correct (3 entries, 5 releases). 101 scrip-days closed inside the
+  80–95% band: 27 held (already banned), 74 stayed out (already free),
+  all correct. A "never banned" model would score 99.04%.
+  SAIL: 80.51% on 4 Nov and held; 79.52% on 5 Nov and released for
+  6 Nov; 82.79% on 6 Nov and stayed out.
+- **SAIL fixtures in CI** (#017). Both in-band cases in one stock.
+- **Scope decision.** Pipeline runner before row 7; v0.1 scope cut.
+
+**Next:** close the day (LEARNING.md, interview questions), then the
+runner walk; build the runner on Tue 10 Nov; tag v0.1 on Wed 11 Nov.
+
+**Still untested on real data:** a scrip exactly on 95.00% or 80.00%,
+a missing prior state, and a new scrip near a line.

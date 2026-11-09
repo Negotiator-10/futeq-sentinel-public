@@ -51,6 +51,18 @@ Interview questions:
 - Why must a pipeline be safe to re-run?
 - What changed with UDiFF?
 
+### Scope change, 9 Nov 2026
+
+- **v0.1 (Wed 11 Nov)** now includes the pipeline runner: one command
+  that runs a day end to end.
+- **Row 7 (check_entity_limit)** moves to Week 3. Its design is complete
+  (#016 and addendum); only the implementation waits.
+- **File watcher and break workflow** move to v1.0.
+
+Why: the trading calendar, Muhurat chaining, expiry, flat-day and
+(tm, ucc) keying work took the time planned for these. That was the
+right trade, because those are what make the result trustworthy.
+
 ## Week 3 (Thu 12 to Wed 18 Nov): limit engine, data quality, circular watcher
 | Day | Work |
 |---|---|
