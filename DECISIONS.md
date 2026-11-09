@@ -1149,3 +1149,34 @@ corporates 20%; that sub-category 10%. `config/rules.yaml` already carried all s
   a UCC alone answers a question with no answer, and row 6 is keyed on `(tm, ucc, isin)`. A test
   puts C001 at two brokers, one opening a fresh position and one holding, and asserts the breach
   lands on the right client.
+
+## #017: SAIL's release as a second fixture window, 9 Nov 2026
+<!-- Authorship. What to assert - held on 3 and 4 Nov, released for 6 Nov, kept out on 6 Nov -
+     and that both in-band cases belong in CI on one stock, are mine. Claude read "held on 3 and
+     4 Nov" as the 3 and 4 Nov closes (the 4 Nov close is the 80.51% one), added the 2 Nov close
+     since its seed was in the fixture anyway, chose the layout below, wrote the builder and the
+     tests, and ran the mutations. -->
+
+- **Decision:** SAIL's 2 to 6 Nov closes are a separate fixture directory,
+  `tests/fixtures/sail_release/`, with tests in their own section of `tests/test_transitions.py`.
+  The next session comes from the calendar, not from the next file in the folder. The builder,
+  `scripts/build_sail_fixture.py`, is committed.
+- **Why separate:** the first window's tests count exactly 51 scrip-days, 7 transitions and 15
+  ban lists, and require both kinds of in-band control on every day. SAIL-only rows dropped into
+  the same files would break those counts rather than extend them, and the fix would have been
+  to loosen the tests that make the first window's claim. A second directory keeps both claims
+  exact.
+- **Why the calendar:** the 6 Nov close is answered by Sunday 8 Nov's list, because the Muhurat
+  session chains (#013 addendum). "The next file on disk" is the bug #013 was written for.
+  This needs one more ban list than "3 to 6 Nov" suggests at each end: 2 Nov is the seed for
+  the first close, and 8 Nov is the answer for the last one. Both are copied byte for byte.
+- **Why a committed builder:** the first fixture set's `SOURCES.md` says to "regenerate with the
+  builder recorded in DECISIONS.md", and no builder is recorded there. This one is a script in
+  the repo, it copies NSE's strings rather than round-tripping them through floats, and rerunning
+  it reproduces the fixture byte for byte.
+- **Evidence:** 8 tests; suite 351 to 359. Five mutations, all caught: a single line at 95%
+  (fails the 2, 3 and 4 Nov closes), a single line at 80% (fails the 6 Nov close), the calendar
+  saying Muhurat does not chain, SAIL added back to the 6 Nov list by hand, and one digit of a
+  READING.md checksum changed. The first two are the point: each half of the band catches a
+  different lazy engine, which is why both had to be fixtures.
+- **Outcome:** accepted, 9 Nov 2026. Still open: the first fixture set has no builder in the repo.

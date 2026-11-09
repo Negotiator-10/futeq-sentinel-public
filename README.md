@@ -122,10 +122,10 @@ installed to import it, because `pyproject.toml` puts `src` on the path for `pyt
 script adds it itself.
 
 `score_bans.py` exits 0 and explains itself when `data/` is absent, since the raw files are
-gitignored. `tests/test_transitions.py` proves the first seven transitions from committed
-fixtures, so they are checked on every push without needing the raw data. SAIL's 6 November
-release, and the two in-band SAIL days around it, are scored from `data/` only and are not yet
-fixtures.
+gitignored. `tests/test_transitions.py` proves all eight transitions from committed fixtures,
+so they are checked on every push without needing the raw data. SAIL's walk out of the ban,
+2 to 6 November, has its own fixture directory, built by `scripts/build_sail_fixture.py`, with
+both in-band cases on the one stock: held at 80.51%, kept out at 82.79%.
 
 ## How it is put together
 

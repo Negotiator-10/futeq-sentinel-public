@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from sentinel.calendar import load_calendar
 from sentinel.engine import is_in_ban, utilisation
 from sentinel.parsers import MwplRow, parse_ban_list
 from sentinel.rules import load_rules
@@ -50,6 +51,10 @@ def rules():
 
 @pytest.fixture(scope="module")
 def rows_by_day() -> dict[dt.date, dict[str, MwplRow]]:
+    return read_rows(FIXTURES / "combineoi_rows.csv")
+
+
+def read_rows(path: Path) -> dict[dt.date, dict[str, MwplRow]]:
     """The fixture rows, as real `MwplRow` objects so their invariants are exercised too.
 
     Read with the `csv` module rather than pandas on purpose: pandas' default missing-value
@@ -57,7 +62,7 @@ def rows_by_day() -> dict[dt.date, dict[str, MwplRow]]:
     silently disarmed the index guard once already.
     """
     out: dict[dt.date, dict[str, MwplRow]] = {}
-    with (FIXTURES / "combineoi_rows.csv").open(encoding="utf-8", newline="") as fh:
+    with path.open(encoding="utf-8", newline="") as fh:
         for rec in csv.DictReader(fh):
             row = MwplRow(
                 trade_date=dt.date.fromisoformat(rec["trade_date"]),
@@ -76,8 +81,12 @@ def rows_by_day() -> dict[dt.date, dict[str, MwplRow]]:
 
 @pytest.fixture(scope="module")
 def bans() -> dict[dt.date, frozenset[str]]:
+    return read_bans(FIXTURES)
+
+
+def read_bans(directory: Path) -> dict[dt.date, frozenset[str]]:
     out = {}
-    for p in sorted(FIXTURES.glob("fo_secban_*.csv")):
+    for p in sorted(directory.glob("fo_secban_*.csv")):
         bl = parse_ban_list(p)
         out[bl.trade_date] = bl.symbols
     return out
@@ -330,3 +339,102 @@ def test_the_selected_rows_are_documented_as_selected():
     doc = (FIXTURES / "SOURCES.md").read_text(encoding="utf-8")
     assert "rows selected" in doc
     assert "combineoi_rows.csv" in doc
+
+
+# == SAIL's walk out of the ban, 2 to 6 Nov 2026 ===========================================
+#
+# A second window, in its own fixture directory so the first window's counts stay what they
+# claim. One stock, five closes: held three times inside the band, released from just below the
+# exit, then kept out inside the band at a HIGHER utilisation than one of the days it was held.
+# Built by `scripts/build_sail_fixture.py`; provenance in `fixtures/sail_release/SOURCES.md`.
+#
+# The next day comes from the calendar, not from "the next file in the folder": the 6 Nov close
+# is answered by Sunday 8 Nov's list because the Muhurat session chains (#013 addendum).
+
+SAIL_FIXTURES = Path(__file__).parent / "fixtures" / "sail_release"
+
+
+@pytest.fixture(scope="module")
+def sail_rows() -> dict[dt.date, MwplRow]:
+    return {day: rows["SAIL"] for day, rows in read_rows(SAIL_FIXTURES / "combineoi_rows.csv").items()}
+
+
+@pytest.fixture(scope="module")
+def sail_bans() -> dict[dt.date, frozenset[str]]:
+    return read_bans(SAIL_FIXTURES)
+
+
+@pytest.fixture(scope="module")
+def calendar():
+    return load_calendar()
+
+
+def sail_forecast(day, sail_rows, sail_bans, rules) -> bool:
+    """Seed from that day's published list - never from the row's own T+1 flag."""
+    r = sail_rows[day]
+    return is_in_ban(r.futeq_oi, r.mwpl, was_in_ban_yesterday="SAIL" in sail_bans[day], rules=rules)
+
+
+SAIL_WALK = [
+    # close                 utilisation  in ban that day  next session          next list has SAIL
+    (dt.date(2026, 11, 2), 0.8470, True,  dt.date(2026, 11, 3), True),    # held
+    (dt.date(2026, 11, 3), 0.8410, True,  dt.date(2026, 11, 4), True),    # held
+    (dt.date(2026, 11, 4), 0.8051, True,  dt.date(2026, 11, 5), True),    # held, 0.51 above exit
+    (dt.date(2026, 11, 5), 0.7952, True,  dt.date(2026, 11, 6), False),   # released
+    (dt.date(2026, 11, 6), 0.8279, False, dt.date(2026, 11, 8), False),   # stays out, in band
+]
+
+
+@pytest.mark.parametrize("day,util,was_banned,next_day,next_banned", SAIL_WALK,
+                         ids=[d.strftime("%d%b") for d, *_ in SAIL_WALK])
+def test_sail_each_close_is_forecast_as_nse_published(
+        sail_rows, sail_bans, rules, calendar, day, util, was_banned, next_day, next_banned):
+    r = sail_rows[day]
+    assert round(utilisation(r.futeq_oi, r.mwpl), 4) == util
+    assert ("SAIL" in sail_bans[day]) is was_banned
+    assert calendar.next_trading_day(day) == next_day
+    assert ("SAIL" in sail_bans[next_day]) is next_banned, "the fixture's answer has changed"
+    assert sail_forecast(day, sail_rows, sail_bans, rules) is next_banned
+
+
+def test_sail_is_held_at_80_51_and_kept_out_at_82_79(sail_rows, sail_bans, rules):
+    """Both in-band cases on one stock in one week, and the higher one is the free one.
+
+    Nothing about the 4 Nov and 6 Nov rows differs except yesterday's state. An engine with a
+    single line anywhere from 80% to 95% gets exactly one of them wrong.
+    """
+    held, out = dt.date(2026, 11, 4), dt.date(2026, 11, 6)
+    u_held = utilisation(sail_rows[held].futeq_oi, sail_rows[held].mwpl)
+    u_out = utilisation(sail_rows[out].futeq_oi, sail_rows[out].mwpl)
+    assert in_band(sail_rows[held], rules) and in_band(sail_rows[out], rules)
+    assert u_out > u_held
+
+    assert sail_forecast(held, sail_rows, sail_bans, rules) is True
+    assert sail_forecast(out, sail_rows, sail_bans, rules) is False
+
+
+def test_sail_has_exactly_one_transition_a_release_effective_6_nov(sail_rows, sail_bans, rules, calendar):
+    seen = []
+    for day in sorted(sail_rows):
+        nxt = calendar.next_trading_day(day)
+        was, will = "SAIL" in sail_bans[day], "SAIL" in sail_bans[nxt]
+        if was != will:
+            seen.append((nxt, "entry" if will else "release"))
+            assert sail_forecast(day, sail_rows, sail_bans, rules) is will
+    assert seen == [(dt.date(2026, 11, 6), "release")]
+
+
+def test_the_sail_fixtures_match_their_sources_and_reading():
+    """Ban lists byte-exact against SOURCES.md; every SOURCES.md hash equals READING.md's."""
+    doc = (SAIL_FIXTURES / "SOURCES.md").read_text(encoding="utf-8")
+    recorded = dict(re.findall(r"\| `((?:fo_secban|combineoi)_\d+\.(?:csv|zip))` \|[^|]*\|[^|]*\| `([0-9a-f]{64})` \|", doc))
+    assert len(recorded) == 11, f"expected 6 ban lists and 5 combineoi in SOURCES.md, found {len(recorded)}"
+
+    for name, digest in recorded.items():
+        if name.startswith("fo_secban"):
+            actual = hashlib.sha256((SAIL_FIXTURES / name).read_bytes()).hexdigest()
+            assert actual == digest, f"{name} does not match the hash in SOURCES.md"
+
+    reading = (Path(__file__).parents[1] / "docs" / "READING.md").read_text(encoding="utf-8")
+    for name, digest in recorded.items():
+        assert f"`{name}` |" in reading and digest in reading, f"{name}: READING.md disagrees"
