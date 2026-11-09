@@ -56,7 +56,7 @@ ONE = Decimal("1.00000000")
 
 
 def fut(day: dt.date, expiry: dt.date, lots: int) -> Position:
-    return Position(trade_date=day, ucc="UCC001", isin=ISIN, instrument=Instrument.FUT,
+    return Position(trade_date=day, tm="TMA", ucc="UCC001", isin=ISIN, instrument=Instrument.FUT,
                     expiry=expiry, strike=None, lot_size=LOT, quantity_lots=lots)
 
 

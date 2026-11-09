@@ -274,9 +274,10 @@ def _fmt(d: Decimal) -> str:
 
 @dataclass(frozen=True)
 class ReductionCheck:
-    """One UCC's position in one banned scrip, checked against SEBI 2025/79 para 5.3."""
+    """One account's position in one banned scrip, checked against SEBI 2025/79 para 5.3."""
 
     trade_date: dt.date
+    tm: str                      # the account is (tm, ucc); a UCC alone is not unique
     ucc: str
     isin: str
     yesterday_delta: Decimal     # yesterday's holdings at yesterday's factors
@@ -308,7 +309,8 @@ def check_ban_period_reduction(
 ) -> tuple[ReductionCheck, ...]:
     """Check that no UCC increased its FutEq delta in a banned scrip.
 
-    Scope: per UCC, per banned ISIN. This is a scope decision, not a dominance
+    Scope: per account - (tm, ucc), since a UCC is only unique within the TM that
+    assigned it - per banned ISIN. This is a scope decision, not a dominance
     claim. Per-UCC and entity-level checks are incomparable: an entity whose
     offsetting legs unwind unevenly (A +10,000 -> +5,000, B -10,000 -> -2,000)
     passes per-UCC while its net goes 0 -> +3,000. An entity check will be added
@@ -351,7 +353,7 @@ def check_ban_period_reduction(
         )
 
     pairs = {
-        (p.ucc, p.isin)
+        (p.tm, p.ucc, p.isin)
         for book in (today, yesterday)
         for p in book
         if p.isin in banned_isins
@@ -359,9 +361,9 @@ def check_ban_period_reduction(
 
     checks: list[ReductionCheck] = []
 
-    for ucc, isin in sorted(pairs):
-        y_positions = yesterday.for_ucc(ucc, isin)
-        t_positions = today.for_ucc(ucc, isin)
+    for tm, ucc, isin in sorted(pairs):
+        y_positions = yesterday.for_account(tm, ucc, isin)
+        t_positions = today.for_account(tm, ucc, isin)
         live = live_on(y_positions, trade_date)
 
         yesterday_delta = futeq_delta(y_positions, factors_yesterday, symbol_for_isin)
@@ -379,6 +381,7 @@ def check_ban_period_reduction(
 
         checks.append(ReductionCheck(
             trade_date=trade_date,
+            tm=tm,
             ucc=ucc,
             isin=isin,
             yesterday_delta=yesterday_delta,

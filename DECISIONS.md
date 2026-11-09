@@ -899,7 +899,10 @@ the calendar comes from, and that turned out to matter more than the store itsel
   handle two types where one empty book iterates as nothing.
 
 - **Outcome:** accepted, 8 Nov 2026. `PropBook.flat()` and the loader support are in, with 15
-  tests. The signature change and both date checks belong to `check_ban_period_reduction()`,
+  tests. **Format note, later the same day:** a `tm` column was added to the positions file
+  (#016 addendum), so the marker row shown above, `2026-10-30,,,FLAT,,,,`, now has nine
+  columns - the date, a blank `tm`, and FLAT under `instrument`. The rule is unchanged: the date
+  and FLAT, every other field blank, `tm` included. The signature change and both date checks belong to `check_ban_period_reduction()`,
   which is not yet in the repo.
 
 ## #016: Entity-level position limits, SPEC row 7, 8 Nov 2026
@@ -1075,5 +1078,10 @@ corporates 20%; that sub-category 10%. `config/rules.yaml` already carried all s
   stated UNKNOWN, and is None exactly when the check is permitted, enforced in `__post_init__`.
 
 - **Outcome of the addendum:** the reference tables are built in `sentinel.entities`, with 22 tests.
-  One question remains before the function: `Position` has a `ucc` field and no `tm`, so a book
-  cannot yet tell the same UCC at two brokers apart.
+  `Position` then had a `ucc` field and no `tm`, so a book could not tell the same UCC at two
+  brokers apart - and my `check_ban_period_reduction()` keyed on `(ucc, isin)`, so it would have
+  merged two brokers' clients who shared a code into one check. Fixed the same day: `Position`
+  carries `tm`, the account is `(tm, ucc)`, `PropBook.uccs` and `for_ucc()` are removed because
+  a UCC alone answers a question with no answer, and row 6 is keyed on `(tm, ucc, isin)`. A test
+  puts C001 at two brokers, one opening a fresh position and one holding, and asserts the breach
+  lands on the right client.

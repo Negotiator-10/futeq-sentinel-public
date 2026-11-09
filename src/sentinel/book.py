@@ -96,6 +96,9 @@ class Position:
     """
 
     trade_date: dt.date
+    #: The trading member the account is registered under. A UCC is a code the TM assigns, so
+    #: it is only unique within one TM: (tm, ucc) is the account. #016 addendum, decision A.
+    tm: str
     ucc: str
     isin: str
     instrument: Instrument
@@ -155,10 +158,23 @@ class Position:
             raise BookError(f"{self.isin} on {self.trade_date}: no UCC. Row 7's limit "
                             f"categories hang off the UCC, so it cannot be blank.")
 
+        if not self.tm.strip():
+            raise BookError(
+                f"{self.ucc} {self.isin} on {self.trade_date}: no trading member. A UCC is only "
+                f"unique within the TM that assigned it, so without the TM the account - and "
+                f"the holder whose limit it counts against - cannot be identified."
+            )
+
+    @property
+    def account(self) -> tuple[str, str]:
+        """(tm, ucc): the account this position sits in. Never the UCC alone."""
+        return (self.tm, self.ucc)
+
     @property
     def key(self) -> tuple:
-        """What makes a position unique within a day: one record per contract per UCC."""
-        return (self.trade_date, self.ucc, self.isin, self.instrument, self.expiry, self.strike)
+        """What makes a position unique within a day: one record per contract per account."""
+        return (self.trade_date, self.tm, self.ucc, self.isin, self.instrument, self.expiry,
+                self.strike)
 
     @property
     def contract(self) -> tuple:
@@ -172,7 +188,7 @@ class Position:
 
 
 class PropBook:
-    """One day's positions, validated, with no two records for the same contract and UCC.
+    """One day's positions, validated, with no two records for the same contract and account.
 
     A day can be in three conditions, and they must stay distinguishable:
 
@@ -223,7 +239,7 @@ class PropBook:
         for p in rows:
             if p.key in seen:
                 raise BookError(
-                    f"{p.ucc} holds two records for {p.isin} {p.instrument.value} expiring "
+                    f"{p.tm}/{p.ucc} holds two records for {p.isin} {p.instrument.value} expiring "
                     f"{p.expiry}. Net them before storing: two rows for one contract make the "
                     f"day's delta depend on which one is read."
                 )
@@ -241,21 +257,28 @@ class PropBook:
     def __repr__(self) -> str:
         return (
             f"<PropBook {self.trade_date} {len(self.positions)} position(s), "
-            f"{len(self.uccs)} UCC(s), {len(self.isins)} scrip(s)>"
+            f"{len(self.accounts)} account(s), {len(self.isins)} scrip(s)>"
         )
 
+    # There is deliberately no `uccs` and no `for_ucc()`. Both existed until 8 Nov, and both
+    # answered a question that has no answer: a UCC alone does not identify an account, because
+    # two brokers can assign the same code to two different clients. Asking by UCC would merge
+    # them silently, so the only way in is by account.
+
     @property
-    def uccs(self) -> tuple[str, ...]:
-        return tuple(sorted({p.ucc for p in self.positions}))
+    def accounts(self) -> tuple[tuple[str, str], ...]:
+        """Every (tm, ucc) holding something in this book."""
+        return tuple(sorted({p.account for p in self.positions}))
 
     @property
     def isins(self) -> tuple[str, ...]:
         return tuple(sorted({p.isin for p in self.positions}))
 
-    def for_ucc(self, ucc: str, isin: str | None = None) -> tuple[Position, ...]:
+    def for_account(self, tm: str, ucc: str, isin: str | None = None) -> tuple[Position, ...]:
+        """One account's positions, optionally in one scrip."""
         return tuple(
             p for p in self.positions
-            if p.ucc == ucc and (isin is None or p.isin == isin)
+            if p.tm == tm and p.ucc == ucc and (isin is None or p.isin == isin)
         )
 
     def for_isin(self, isin: str) -> tuple[Position, ...]:
@@ -413,7 +436,8 @@ def _parse_strike(text: str, instrument: Instrument) -> Decimal | None:
 
 
 _POSITION_COLUMNS = {
-    "trade_date", "ucc", "isin", "instrument", "expiry", "strike", "lot_size", "quantity_lots",
+    "trade_date", "tm", "ucc", "isin", "instrument", "expiry", "strike", "lot_size",
+    "quantity_lots",
 }
 
 
@@ -427,6 +451,7 @@ def _parse_position(rec: Mapping[str, str], path: str | Path, lineno: int) -> Po
         instrument = Instrument.from_nse(rec["instrument"])
         return Position(
             trade_date=dt.date.fromisoformat(rec["trade_date"].strip()),
+            tm=rec["tm"].strip(),
             ucc=rec["ucc"].strip(),
             isin=rec["isin"].strip(),
             instrument=instrument,
@@ -485,7 +510,8 @@ def load_books(path: str | Path) -> dict[dt.date, PropBook]:
         raise BookError(
             f"{path}: a header and no rows. That is what a truncated or failed write looks like, "
             f"so it is refused rather than read as a flat day. A day on which nothing was held "
-            f"is written as one FLAT marker row: '<date>,,,FLAT,,,,'."
+            f"is written as one FLAT marker row: the date, instrument FLAT, every other field "
+            f"blank."
         )
 
     books = {day: PropBook(rows) for day, rows in by_date.items()}

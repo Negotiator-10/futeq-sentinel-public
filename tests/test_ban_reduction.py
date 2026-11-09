@@ -66,8 +66,9 @@ def deltas():
     return load_delta_factors_by_date(FIXTURES / "table2_deltas.csv")
 
 
-def fut(day, ucc, lots, isin=ISIN, expiry=NOV):
-    return Position(day, ucc, isin, Instrument.FUT, expiry, None, 1000, lots)
+def fut(day, ucc, lots, isin=ISIN, expiry=NOV, tm="TMA"):
+    return Position(trade_date=day, tm=tm, ucc=ucc, isin=isin, instrument=Instrument.FUT,
+                    expiry=expiry, strike=None, lot_size=1000, quantity_lots=lots)
 
 
 def fac(day, *expiries):
@@ -227,6 +228,25 @@ def test_swapped_books_are_refused(rules, calendar):
 
 
 # -- scope: per UCC, per banned scrip ----------------------------------------------------
+
+
+def test_the_same_ucc_at_two_brokers_is_checked_as_two_accounts(rules, calendar):
+    """The collision the `tm` field exists for.
+
+    Two different clients both carry the code C001 - one at broker TMA, one at TMB, because each
+    broker numbers its own clients. The TMA client opens a fresh position in the banned scrip;
+    the TMB client holds steady. Keyed on the UCC alone, the two would merge into one check:
+    yesterday 2000, today 3000 - an "increase" belonging to nobody. Keyed on the account, the
+    breach lands on the right client and the other is permitted.
+    """
+    checks = run(PropBook([fut(TUE, "C001", 1, tm="TMA"), fut(TUE, "C001", 2, tm="TMB")]),
+                 PropBook([fut(MON, "C001", 2, tm="TMB")]),
+                 fac(TUE, NOV), fac(MON, NOV), rules, calendar)
+    by_account = {(c.tm, c.ucc): c for c in checks}
+    assert set(by_account) == {("TMA", "C001"), ("TMB", "C001")}
+    assert not by_account[("TMA", "C001")].permitted
+    assert by_account[("TMA", "C001")].reason == "fresh position of 1000 in a banned scrip"
+    assert by_account[("TMB", "C001")].permitted
 
 
 def test_one_ucc_cannot_offset_another(rules, calendar):

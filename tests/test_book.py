@@ -42,9 +42,9 @@ EXPIRY = dt.date(2026, 10, 27)
 DAY = dt.date(2026, 10, 12)
 
 
-def pos(instrument=Instrument.FUT, *, qty=1, strike=None, day=DAY, ucc="UCC001",
+def pos(instrument=Instrument.FUT, *, qty=1, strike=None, day=DAY, tm="TMA", ucc="UCC001",
         isin=ISIN, lot=1000, expiry=EXPIRY) -> Position:
-    return Position(trade_date=day, ucc=ucc, isin=isin, instrument=instrument,
+    return Position(trade_date=day, tm=tm, ucc=ucc, isin=isin, instrument=instrument,
                     expiry=expiry, strike=strike, lot_size=lot, quantity_lots=qty)
 
 
@@ -139,7 +139,30 @@ def test_two_records_for_one_contract_and_ucc_are_refused():
 def test_the_same_contract_for_two_uccs_is_fine():
     book = PropBook([pos(ucc="UCC001"), pos(ucc="UCC002")])
     assert len(book) == 2
-    assert book.uccs == ("UCC001", "UCC002")
+    assert book.accounts == (("TMA", "UCC001"), ("TMA", "UCC002"))
+
+
+def test_the_same_ucc_at_two_brokers_is_two_accounts_not_a_duplicate():
+    """Why `tm` exists. Each broker numbers its own clients, so the same UCC string under two
+    trading members is two different accounts - and, usually, two different people. Without
+    `tm` the book refused this as a duplicate, or worse, merged it."""
+    book = PropBook([pos(tm="TMA", ucc="C001", qty=1), pos(tm="TMB", ucc="C001", qty=-3)])
+    assert book.accounts == (("TMA", "C001"), ("TMB", "C001"))
+    assert book.for_account("TMA", "C001")[0].quantity_lots == 1
+    assert book.for_account("TMB", "C001")[0].quantity_lots == -3
+
+
+def test_a_position_without_a_trading_member_is_refused():
+    with pytest.raises(BookError, match="only unique within the TM"):
+        pos(tm="  ")
+
+
+def test_a_book_cannot_be_asked_by_ucc_alone():
+    """`uccs` and `for_ucc()` were removed on 8 Nov: a UCC alone does not identify an account,
+    so asking by it would merge two brokers' clients silently."""
+    book = PropBook([pos()])
+    assert not hasattr(book, "for_ucc")
+    assert not hasattr(book, "uccs")
 
 
 def test_an_empty_book_is_a_missing_file_not_a_day():
@@ -314,8 +337,8 @@ def test_a_missing_column_in_the_book_is_refused(tmp_path):
 def test_a_bad_row_names_its_line_number(tmp_path):
     bad = tmp_path / "b.csv"
     bad.write_text(
-        "trade_date,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
-        "2026-10-12,UCC001,INE114A01011,CE,2026-10-29,0,1000,1\n",
+        "trade_date,tm,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
+        "2026-10-12,TMA,UCC001,INE114A01011,CE,2026-10-29,0,1000,1\n",
         encoding="utf-8",
     )
     with pytest.raises(BookError, match="line 2"):
@@ -371,8 +394,8 @@ def test_a_row_with_a_missing_isin_is_refused_not_skipped(tmp_path):
     """
     bad = tmp_path / "b.csv"
     bad.write_text(
-        "trade_date,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
-        "2026-10-12,UCC01,,FF,2026-10-29,,500,3\n",
+        "trade_date,tm,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
+        "2026-10-12,TMA,UCC01,,FF,2026-10-29,,500,3\n",
         encoding="utf-8",
     )
     with pytest.raises(BookError, match="ISIN"):
@@ -394,8 +417,8 @@ def test_a_wholly_blank_row_is_skipped(tmp_path):
     """Trailing commas in a CSV carry nothing, so they are not an error."""
     good = tmp_path / "b.csv"
     good.write_text(
-        "trade_date,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
-        "2026-10-12,UCC01,INE114A01011,FF,2026-10-29,0,1000,1\n"
+        "trade_date,tm,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
+        "2026-10-12,TMA,UCC01,INE114A01011,FF,2026-10-29,0,1000,1\n"
         ",,,,,,,\n",
         encoding="utf-8",
     )
@@ -408,8 +431,8 @@ def test_a_futures_strike_is_none_however_nse_spells_zero(tmp_path, written):
     a futures row written `0.00` raised "a future has no strike"."""
     good = tmp_path / "b.csv"
     good.write_text(
-        "trade_date,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
-        f"2026-10-12,UCC01,INE114A01011,FF,2026-10-29,{written},1000,1\n",
+        "trade_date,tm,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
+        f"2026-10-12,TMA,UCC01,INE114A01011,FF,2026-10-29,{written},1000,1\n",
         encoding="utf-8",
     )
     assert load_book(good).positions[0].strike is None
@@ -420,8 +443,8 @@ def test_an_option_written_with_a_zero_strike_gets_the_accurate_complaint(tmp_pa
     writes a futures row, so the row is probably mis-parsed."""
     bad = tmp_path / "b.csv"
     bad.write_text(
-        "trade_date,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
-        "2026-10-12,UCC01,INE114A01011,CE,2026-10-29,0,1000,1\n",
+        "trade_date,tm,ucc,isin,instrument,expiry,strike,lot_size,quantity_lots\n"
+        "2026-10-12,TMA,UCC01,INE114A01011,CE,2026-10-29,0,1000,1\n",
         encoding="utf-8",
     )
     with pytest.raises(BookError, match="how NSE writes a FUTURES row"):
