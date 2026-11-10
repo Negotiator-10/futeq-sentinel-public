@@ -334,3 +334,28 @@ a missing prior state, and a new scrip near a line.
   Both parsed to the same rows. The builder now writes NSE's exact bytes,
   and the manifest records those, so a fixture can no longer drift from
   its source without a hash failing.
+- **The pipeline runner** (#019, `ee07d83`). `python -m sentinel.runner D`
+  runs a day end to end and exits 0 COMPLETED, 2 REFUSED, 1 FAILED. The
+  whole run refuses on a holiday, an unknown date, an excluded or
+  unverified special session, a missing combineoi_D, or an unresolved
+  banned symbol. Everything else refuses only the stage that needs the
+  missing input. Three new rules, #019 items 13-15: an unverified next
+  day refuses only the forecast; an unresolved banned symbol refuses the
+  whole run, as ingest does; an excluded special session refuses the run.
+  Retries are dropped, item 12: there is no downloader.
+- **The store records each run's rules status** (`726d645`): the assumed
+  and unverified rule keys, for the report footer. Running my runner tests
+  against the store found a bug in it: the ban-state guard needed the next
+  trading day even to store D's own official state, so item 13 crashed.
+  The guard now asks the calendar only for a forecast.
+- **Tested.** Ten runner tests, nine of them on the synthetic window in CI.
+  Six mutations, all caught, after the holiday test was fixed to check why
+  it refused. CI on Linux: 398 passed, 33 skipped, including the held-lock
+  refusal, the first run of the lock's Linux branch through the runner.
+  Locally: 431 passed, including 4 Nov on the real files and its rerun.
+- **Acquisition ruled out** (#010 addendum). NSE's terms forbid automated
+  collection, so v1.0 gets an importer, not a downloader. A filtered public
+  copy of the repository is built and scans clean; it waits for the v0.1 tag.
+
+**Next:** the report renderer from the store, the README for v0.1, the
+private v0.1 tag, then the public rebuild and the scan before I push it.

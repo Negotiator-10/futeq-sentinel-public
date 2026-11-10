@@ -211,6 +211,42 @@ release actually came on 6 Nov, after SAIL closed at 79.52% on 5 Nov.
 *Changes:* before asking for new files, I read what the files on disk
 already say about the question.
 
+## 10 Nov 2026
+
+### What I learned
+
+**1. Read the terms before writing the code.**
+I wanted an automatic downloader. NSE's terms of use (para 9) prohibit
+systematic or automated data collection, with no consent route on the
+main site. robots.txt allowing "/" didn't change that: robots.txt is a
+convention for crawlers, the terms are the contract. Driving a real
+browser would still be automated collection, and would also get round
+the block NSE uses to enforce it.
+*Changes:* before automating access to anyone's data, I read their
+terms first. The project now uses manual downloads plus an importer.
+
+**2. A test that passes with the code deleted tests nothing.**
+My holiday test passed with the holiday check removed: the run was
+still refused, just for a missing file instead. The test checked that
+it was refused, not why. Mutation testing found it: delete the code,
+run the tests, expect a failure. The same day, SQLite let a malformed
+rules_status through because a CHECK that evaluates to NULL counts as
+a pass.
+*Changes:* I assert the reason, not just the outcome, and for each
+check I ask "would this still pass if the thing it checks were gone?"
+
+**3. A hash doesn't hide a small search space.**
+Committing hashes of NSE's numbers so CI could detect them would have
+published them. MWPL and open interest are whole numbers of 7 to 9
+digits, about a billion candidates, which a laptop hashes in minutes;
+and there are only 221 symbols. Anyone can hash every candidate and
+match. (FutEq OI has eight decimals, too many to brute-force, but MWPL
+and OI alone already reveal the row.) CI checks shapes instead:
+NSE-style file names, real-looking ISINs, real symbols in ban lists;
+the full comparison runs locally against data/.
+*Changes:* before treating a hash as secret, I count how many inputs
+could have produced it.
+
 ## Gaps list
 Questions from teach-backs that need more work. Strike them out once you can answer them
 without notes.
