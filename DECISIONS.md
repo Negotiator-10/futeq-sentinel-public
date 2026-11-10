@@ -1298,7 +1298,9 @@ forecast D+1, reconcile, row 6, report.
 4. **Run log, outside the transaction.** RUNNING before; COMPLETED,
    REFUSED or FAILED after. Columns: run_id, trade_date, started_at,
    finished_at, outcome, reason, input_checksums, code_version, dirty,
-   rules_checksum, calendar_checksum.
+   rules_checksum, calendar_checksum, rules_status (the rules file's
+   keys by state, {"assumed": [...], "unverified": [...]}, so the footer
+   names the thresholds used on an assumption and the ones refused).
 5. **Missing vs not run.** A missing input is a refusal record in the
    day's transaction. "Not run" is no COMPLETED row in the run log.
    A NULL alone means nothing.
@@ -1325,6 +1327,19 @@ forecast D+1, reconcile, row 6, report.
     hand into `data/`, and the importer verifies its heading date and
     checksum. The runner reads `data/` either way, so it does not
     change.
+13. **Unverified next trading day refuses only the forecast.** D itself is
+    settled, so its official state, reconciliation, row 6 and D-1's score
+    are still correct; only the forecast's target day is unknown. Recorded
+    as a whole-stage FORECAST refusal (subject "").
+    The store enforces it too: the ban-state guard consults the calendar
+    only for forecast writes, so D's official state is stored either way.
+14. **Unresolved banned symbol refuses the whole run.** Matches
+    ingest.load_official_day: under-reporting a ban is the worst error to
+    make quietly (#011 Q2), and one failure handled two ways in two code
+    paths is worse than either choice.
+15. **Excluded special session refuses the whole run.** Its official state
+    is not a link in any chain, so storing it invites misuse as a seed.
+    No date uses it yet; revisit if a real excluded session occurs.
 
 **Why.** Every piece applies a rule already in the project: missing
 inputs are stated, never inferred (#011, #015); nothing derived is
