@@ -143,6 +143,8 @@ build their fixtures from `data/` with `scripts/build_nse_fixtures.py`, check ev
 
 **Commits before 10 Nov 2026 won't run their tests.** The public repository's history was
 filtered to remove NSE's files, so those commits refer to fixtures that are no longer in it.
+Filtering also rewrote every commit hash, so a hash quoted inside a file - in `progress.md`, for
+instance - is the private record's, not the public repository's.
 
 ## Running a day
 
