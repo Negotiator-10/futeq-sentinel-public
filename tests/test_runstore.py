@@ -73,7 +73,8 @@ def lock(tmp_path):
 def start(store, lock, day=WED4, **overrides):
     kw = dict(lock=lock, input_checksums={"combineoi_04112026.zip": SHA_A,
                                           "fo_secban_04112026.csv": SHA_B},
-              code_version="3c62801", dirty=False, rules_checksum=SHA_A, calendar_checksum=SHA_B)
+              code_version="3c62801", dirty=False, rules_checksum=SHA_A, calendar_checksum=SHA_B,
+              rules_status={"assumed": ["single_stock.ban.example_assumed"], "unverified": []})
     kw.update(overrides)
     return store.start_run(day, **kw)
 
@@ -204,6 +205,40 @@ def test_a_run_must_name_its_inputs_and_code(store, lock, override, match):
         start(store, lock, **override)
 
 
+def test_the_rules_status_is_recorded_as_keys_and_read_back(store, lock):
+    """The report footer names the assumed and the refused rules from the run log."""
+    run = start(store, lock, rules_status={"assumed": ["b.second", "a.first"],
+                                           "unverified": ["c.refused"]})
+    assert run.rules_status == {"assumed": ("a.first", "b.second"), "unverified": ("c.refused",)}
+    assert store.runs_for(WED4)[0].rules_status == run.rules_status
+
+
+def test_the_real_rules_status_round_trips(store, lock, rules):
+    status = {"assumed": list(rules.assumed), "unverified": list(rules.unverified)}
+    assert rules.assumed, "rules.yaml has assumed keys today; this test means nothing without them"
+    run = start(store, lock, rules_status=status)
+    assert run.rules_status["assumed"] == tuple(sorted(rules.assumed))
+    assert run.rules_status["unverified"] == tuple(sorted(rules.unverified))
+
+
+@pytest.mark.parametrize("status,match", [
+    ({"assumed": []}, "exactly the lists"),
+    ({"assumed": [], "unverified": [], "extra": []}, "exactly the lists"),
+    ("assumed", "exactly the lists"),
+    ({"assumed": "rules.yaml: 4 threshold(s) rest on an assumption", "unverified": []},
+     "one string"),
+    ({"assumed": ["rules.yaml: 4 threshold(s) rest on an assumption"], "unverified": []},
+     "not a rule key"),
+    ({"assumed": [""], "unverified": []}, "not a rule key"),
+    ({"assumed": ["a.b", "a.b"], "unverified": []}, "repeats a key"),
+    ({"assumed": ["a.b"], "unverified": ["a.b"]}, "both assumed and unverified"),
+])
+def test_a_rules_status_that_is_not_two_lists_of_keys_is_refused(store, lock, status, match):
+    with pytest.raises(StoreError, match=match):
+        start(store, lock, rules_status=status)
+    assert store.runs_for(WED4) == ()                   # refused before anything was written
+
+
 def test_the_dirty_flag_is_recorded_not_refused(store, lock):
     """Decision 7: uncommitted code is recorded, so the report can say 'not reproducible'."""
     assert start(store, lock, dirty=True).dirty is True
@@ -221,13 +256,19 @@ def test_the_run_log_cannot_be_written_inside_the_day_transaction(store, lock):
 def test_the_schema_holds_the_run_log_rules_even_by_raw_sql(store):
     insert = ("INSERT INTO run_log (run_id, trade_date, started_at, finished_at, outcome, reason, "
               "input_checksums, code_version, dirty, rules_checksum, calendar_checksum, "
-              "superseded_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
-    base = ["r1", "2026-11-04", "t", None, "RUNNING", "", "{}", "c", 0, SHA_A, SHA_B, None]
+              "rules_status, superseded_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    status = '{"assumed": [], "unverified": []}'
+    base = ["r1", "2026-11-04", "t", None, "RUNNING", "", "{}", "c", 0, SHA_A, SHA_B, status, None]
+    store._conn.execute(insert, base)              # the base row is valid, so each case below
+    store._conn.execute("DELETE FROM run_log")     # fails for its own reason, not a shared one
     bad = {
         "RUNNING with a finish time": {3: "t2"},
         "ABANDONED with no successor": {4: "ABANDONED", 3: "t2", 5: "crashed"},
         "FAILED with no reason": {4: "FAILED", 3: "t2"},
         "an outcome that does not exist": {4: "DONE", 3: "t2"},
+        "no rules status": {11: None},
+        "rules status missing a list": {11: '{"assumed": []}'},
+        "rules status as a sentence": {11: '{"assumed": "4 thresholds", "unverified": []}'},
     }
     for label, changes in bad.items():
         row = list(base)
@@ -303,6 +344,28 @@ def test_run_d_writes_only_ds_official_state_and_the_next_days_forecast(store, l
             store.record_forecast(WED4, {HELD_ISIN: ("HELDCO", True)}, input_sha256=SHA_A)
         with pytest.raises(StoreError, match="open day transaction is for 2026-11-04"):
             store.record_refusals([Refusal(THU5, RefusalStage.ROW6, "", "x")])
+
+
+def test_an_unverified_next_day_blocks_the_forecast_but_not_ds_official_state(tmp_path):
+    """#019 item 13 at the store: with the Muhurat Sunday's verdict removed, run Fri 6 Nov can
+    still store 6 Nov's official state. Only a forecast needs the next trading day, so only a
+    forecast write meets the calendar's refusal."""
+    from sentinel.calendar import ChainUnverifiedError, DEFAULT_CALENDAR_PATH
+
+    stripped = tmp_path / "calendar.csv"
+    text = DEFAULT_CALENDAR_PATH.read_text(encoding="utf-8")
+    stripped.write_text("".join(ln for ln in text.splitlines(keepends=True)
+                                if not ln.startswith("chaining_")), encoding="utf-8")
+    fri = dt.date(2026, 11, 6)
+    with RunLock(tmp_path / "run.lock") as held, \
+            BanStateStore(tmp_path / "s.sqlite", load_calendar(stripped)) as s:
+        run = start(s, held, day=fri)
+        with s.day_transaction(fri, run.run_id):
+            s.record_official(fri, {HELD_ISIN: ("HELDCO", True)}, input_sha256=SHA_A)
+            with pytest.raises(ChainUnverifiedError):
+                s.record_forecast(dt.date(2026, 11, 9), {HELD_ISIN: ("HELDCO", True)},
+                                  input_sha256=SHA_A)
+        assert s.was_in_ban(HELD_ISIN, fri) is True
 
 
 def test_the_forecast_crosses_the_muhurat_sunday(store, lock):

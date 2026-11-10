@@ -155,6 +155,9 @@ class RunRecord:
     dirty: bool
     rules_checksum: str
     calendar_checksum: str
+    #: The rules file's keys by state, as the run read it: {"assumed": (...), "unverified": (...)}.
+    #: Recorded, not re-derived, because only the exact file the run read can re-derive it.
+    rules_status: dict[str, tuple[str, ...]]
     superseded_by: str | None
 
 
@@ -263,6 +266,9 @@ CREATE TABLE IF NOT EXISTS run_log (
     dirty              INTEGER NOT NULL CHECK (dirty IN (0, 1)),
     rules_checksum     TEXT    NOT NULL CHECK (length(rules_checksum) = 64),
     calendar_checksum  TEXT    NOT NULL CHECK (length(calendar_checksum) = 64),
+    rules_status       TEXT    NOT NULL          -- JSON {"assumed": [keys], "unverified": [keys]}
+                       CHECK (json_type(rules_status, '$.assumed') IS 'array'
+                              AND json_type(rules_status, '$.unverified') IS 'array'),  -- IS: a NULL must fail
     superseded_by      TEXT    REFERENCES run_log (run_id),
     CHECK ((outcome = 'RUNNING') = (finished_at IS NULL)),
     CHECK ((outcome = 'ABANDONED') = (superseded_by IS NOT NULL)),
@@ -420,11 +426,13 @@ class BanStateStore:
         if self._txn is None:
             return
         run_day = self._txn[0]
-        allowed = {"official": run_day, "record": run_day}
-        allowed["forecast"] = self.calendar.next_trading_day(run_day)
-        if allowed[column] != day:
+        # Walk the calendar only for a forecast. D's own official state does not depend on
+        # D's next trading day, so an unverified next day (#019 item 13) must not block it.
+        allowed = (self.calendar.next_trading_day(run_day) if column == "forecast"
+                   else run_day)
+        if allowed != day:
             raise StoreError(
-                f"the run for {run_day} may write {column} for {allowed[column]} only, not "
+                f"the run for {run_day} may write {column} for {allowed} only, not "
                 f"{day}. A run on D stores D's official state and the next trading day's "
                 f"forecast (#011); anything else would be another day's result."
             )
@@ -617,6 +625,7 @@ class BanStateStore:
     def start_run(
         self, trade_date: dt.date, *, lock: RunLock, input_checksums: Mapping[str, str],
         code_version: str, dirty: bool, rules_checksum: str, calendar_checksum: str,
+        rules_status: Mapping[str, Iterable[str]],
     ) -> RunRecord:
         """Write a RUNNING row for `trade_date`, and abandon any RUNNING row it supersedes.
 
@@ -627,6 +636,10 @@ class BanStateStore:
 
         Deliberately does not ask the calendar: a run for an unknown date must still be able to
         log that it REFUSED.
+
+        `rules_status` is the rules file's keys by state, `{"assumed": [...], "unverified": [...]}`
+        - `Rules.assumed` and `Rules.unverified` - so the report footer can name the thresholds the
+        run used on an assumption and the ones it refused. Keys, never the loader's warning text.
         """
         self._refuse_inside_txn("start_run")
         if not lock.held:
@@ -643,6 +656,7 @@ class BanStateStore:
                 raise StoreError(f"{label} is {sha!r}, not a sha256")
         if not code_version.strip():
             raise StoreError("code_version is blank; a run that cannot name its code is not reproducible")
+        status = _check_rules_status(rules_status)
 
         run_id = uuid.uuid4().hex
         now = _now()
@@ -650,9 +664,10 @@ class BanStateStore:
             self._conn.execute(
                 "INSERT INTO run_log (run_id, trade_date, started_at, finished_at, outcome, reason, "
                 " input_checksums, code_version, dirty, rules_checksum, calendar_checksum, "
-                " superseded_by) VALUES (?,?,?,NULL,'RUNNING','',?,?,?,?,?,NULL)",
+                " rules_status, superseded_by) VALUES (?,?,?,NULL,'RUNNING','',?,?,?,?,?,?,NULL)",
                 (run_id, trade_date.isoformat(), now, json.dumps(checksums, sort_keys=True),
-                 code_version, int(dirty), rules_checksum, calendar_checksum),
+                 code_version, int(dirty), rules_checksum, calendar_checksum,
+                 json.dumps(status, sort_keys=True)),
             )
             self._conn.execute(
                 "UPDATE run_log SET outcome = 'ABANDONED', finished_at = ?, superseded_by = ?, "
@@ -982,6 +997,40 @@ def _check_sha(sha: str) -> None:
         )
 
 
+_RULES_STATES = ("assumed", "unverified")
+
+
+def _check_rules_status(status: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
+    """`{"assumed": [...], "unverified": [...]}` with dotted keys only, returned sorted.
+
+    Both lists are required, even when empty: an empty list says "none", a missing one says
+    nothing. A key in both is a contradiction - an assumed threshold is used, an unverified one
+    is refused - so it is refused rather than recorded.
+    """
+    if not isinstance(status, Mapping) or set(status) != set(_RULES_STATES):
+        got = sorted(status) if isinstance(status, Mapping) else type(status).__name__
+        raise StoreError(f"rules_status needs exactly the lists {list(_RULES_STATES)}, got {got}")
+    out: dict[str, list[str]] = {}
+    for state in _RULES_STATES:
+        values = status[state]
+        if isinstance(values, str):
+            raise StoreError(f"rules_status[{state!r}] is one string; it must be a list of rule keys")
+        keys = list(values)
+        bad = [k for k in keys if not isinstance(k, str) or not k.strip() or " " in k.strip()]
+        if bad:
+            raise StoreError(
+                f"rules_status[{state!r}] holds {bad[0]!r}, which is not a rule key. Record "
+                f"Rules.{state}, not the loader's warning text."
+            )
+        if len(set(keys)) != len(keys):
+            raise StoreError(f"rules_status[{state!r}] repeats a key")
+        out[state] = sorted(keys)
+    both = sorted(set(out["assumed"]) & set(out["unverified"]))
+    if both:
+        raise StoreError(f"{both[0]} is recorded as both assumed and unverified")
+    return out
+
+
 def _single_date(items: tuple, what: str) -> dt.date:
     if not items:
         raise StoreError(
@@ -1001,5 +1050,7 @@ def _run_record(row: sqlite3.Row) -> RunRecord:
         outcome=RunOutcome(row["outcome"]), reason=row["reason"],
         input_checksums=json.loads(row["input_checksums"]), code_version=row["code_version"],
         dirty=bool(row["dirty"]), rules_checksum=row["rules_checksum"],
-        calendar_checksum=row["calendar_checksum"], superseded_by=row["superseded_by"],
+        calendar_checksum=row["calendar_checksum"],
+        rules_status={k: tuple(v) for k, v in json.loads(row["rules_status"]).items()},
+        superseded_by=row["superseded_by"],
     )
