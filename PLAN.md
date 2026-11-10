@@ -111,29 +111,29 @@ Interview questions:
 
 ## Checklist
 All 9 automations:
-- [ ] 1. Pipeline runner (W2)
-- [ ] 2. File and deadline watcher (W2)
+- [ ] 1. Pipeline runner (W2). In progress: the run log, lock and result tables are built (#019); the runner itself is not.
+- [ ] 2. File and deadline watcher (W2). Moved to v1.0.
 - [ ] 3. Alerts (W4)
 - [ ] 4. Morning report (W5)
-- [ ] 5. Rules in a config file (W1)
+- [x] 5. Rules in a config file (W1)
 - [ ] 6. Data-quality monitors (W3)
 - [ ] 7. Circular watcher (W3)
-- [ ] 8. Break workflow (W2)
-- [ ] 9a. Automatic tests on every push (W1)
+- [ ] 8. Break workflow (W2). Moved to v1.0.
+- [x] 9a. Automatic tests on every push (W1)
 - [ ] 9b. Scheduled run and live page (W5)
 
 Engine:
-- [ ] Spec
-- [ ] Downloader
-- [ ] Parsers and data contracts
-- [ ] Point-in-time store
+- [x] Spec
+- [ ] Downloader. Files are still fetched by hand (#010).
+- [x] Parsers and data contracts
+- [x] Point-in-time store
 - [ ] Reference-data detector
-- [ ] Reconciliation
+- [x] Reconciliation
 - [ ] Deltas
-- [ ] FutEq, MWPL and ban forecast
-- [ ] Validation against NSE
-- [ ] Entity and intraday limits
-- [ ] Ban-period checker
+- [ ] FutEq, MWPL and ban forecast. Partial: the ban forecast is done, but it reads FutEq OI and MWPL as NSE publishes them; I do not compute either yet.
+- [x] Validation against NSE (ban forecasts scored against NSE's ban lists: 3241/3241 to 9 Nov)
+- [ ] Entity and intraday limits. Row 7 is a stub; designed in #016, built in Week 3.
+- [x] Ban-period checker (row 6)
 - [ ] Penalties
 - [ ] OTR module
 - [ ] NSE-format daily report
@@ -152,7 +152,7 @@ Learning:
 
 Verify before going public (see `docs/READING.md`):
 - [ ] OTR bands and dates
-- [ ] MWPL formula and the 10/20/30% limits
-- [ ] Intraday limits start date
+- [x] MWPL formula and the 10/20/30% limits (SEBI 2025/79 paras 5.2.3, 5.2.4 and 5.8.1)
+- [x] Intraday limits start date (SEBI 2025/122 para 6)
 - [ ] Whether the delta files are public
-- [ ] Expiry-day changes
+- [ ] Expiry-day changes. Observed in the bhavcopies, not yet checked against a circular.
