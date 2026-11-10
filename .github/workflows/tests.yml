@@ -43,6 +43,13 @@ jobs:
           fi
           echo "clean: nothing tracked under data/, no .env, no PDFs, no archives"
 
+      - name: Confirm no NSE content came back into the repository
+        # DECISIONS.md #010 addendum. CI has no copy of NSE's files to compare against, so this
+        # checks shapes: a file named like NSE's outside tests/fixtures/synthetic/, a row keyed
+        # on a real-looking ISIN, or a ban list naming anything but the synthetic scrips. The
+        # full comparison against data/ runs locally, in tests/test_nse_local.py.
+        run: python -I scripts/check_public_history.py --ci .
+
       - name: Tests
         # -W error::UserWarning matches pyproject's filterwarnings, so a threshold that rests
         # on an assumption rather than a citation fails the build until someone acknowledges it.

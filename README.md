@@ -112,7 +112,7 @@ Python 3.12.
 
 ```
 pip install -e ".[dev]"
-pytest                        # 409 tests; 31 skip without NSE's files in data/
+pytest                        # 410 tests; 32 skip without NSE's files in data/
 python scripts/score_bans.py  # reproduces the full score from the files in data/
 ```
 

@@ -80,6 +80,23 @@ def test_360one_headroom_is_nses_figure_untruncated(oct30, rules):
     assert 0 <= got - row.headroom_shares < 1
 
 
+def test_the_tracked_files_hold_no_nse_content(nse_built):
+    """The full scan, against every NSE file in data/, over what the next commit would publish.
+
+    CI runs only the shape rules (`--ci`), because it has no data/ to compare against. This is
+    the comparison itself: a copied row, a quoted MWPL or a real ban list anywhere in a tracked
+    file fails here, whatever the file is called."""
+    from tests.conftest import REPO, _builder
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "check_public_history", REPO / "scripts" / "check_public_history.py")
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    hits = checker.worktree_hits(REPO, _builder().DATA)
+    assert not hits, "\n".join(hits)
+
+
 def test_the_whole_30_oct_file_reconciles(oct30, rules):
     rec = reconcile(tuple(oct30.values()), rules)
     assert rec.ok, rec.failures
