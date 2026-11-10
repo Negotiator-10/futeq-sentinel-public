@@ -35,12 +35,16 @@ NOTE = ("> **Synthetic sample.** Rendered by `scripts/render_sample_reports.py` 
 
 
 def main() -> int:
-    OUT.mkdir(parents=True, exist_ok=True)
+    # Render every day before writing any file: a sample already written into the tree would
+    # make the next run's checkout dirty, and its footer would say "not reproducible".
+    rendered = []
     for day in DAYS:
         with tempfile.TemporaryDirectory() as tmp:
             paths = synthetic_paths(Path(tmp))
             outcome = runner.run_day(day, paths)
-            text = report.render(day, paths)
+            rendered.append((day, outcome, report.render(day, paths)))
+    OUT.mkdir(parents=True, exist_ok=True)
+    for day, outcome, text in rendered:
         out = OUT / f"{day.isoformat()}.md"
         out.write_text(NOTE + text, encoding="utf-8", newline="\n")
         print(f"{day}: run {outcome.name}, wrote {out.relative_to(REPO).as_posix()}")
