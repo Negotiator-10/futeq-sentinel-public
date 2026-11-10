@@ -1,25 +1,29 @@
 """The report's layout, on runs of the synthetic window.
 
-The two judgements in the report - `flag_disagreements()` and `watchlist()` - are Chintamani's
-and are not written yet, so these tests replace them with stand-ins and check everything around
-them: the section order, refused sections saying so, the footer, and the report refusing when
-there is no run to describe. His own tests for the two functions go beside these.
+The layout tests replace the report's two judgements with stand-ins and check everything
+around them: the section order, refused sections saying so, the footer, and the report refusing
+when there is no run to describe. Written by Claude, as the plumbing around his functions.
 
-Written by Claude, as the plumbing around his functions.
+The tests at the end are Chintamani's, for the two judgements themselves -
+`flag_disagreements()` and `watchlist()`. Claude added `make_row()` for them.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import math
 import shutil
 
 import pytest
 
 from sentinel import report, runner
 from sentinel.calendar import load_calendar
+from sentinel.parsers import MwplRow
 from sentinel.report import (
     Disagreement, FlagComparison, NotCompared, ReportRefused, WatchEntry, WatchState,
+    flag_disagreements, watchlist,
 )
+from sentinel.runner import RunPaths
 from sentinel.rules import load_rules
 from sentinel.runlock import RunLock
 from sentinel.store import BanStateStore, RunOutcome
@@ -283,9 +287,107 @@ def test_the_command_writes_the_file_and_refuses_with_exit_2(tmp_path, monkeypat
     assert report.main(["report", "2026-10-12"]) == 2
 
 
-def test_the_two_judgements_are_still_stubs():
-    """Remove this when they are written: it is here so the stubs cannot be forgotten."""
-    with pytest.raises(NotImplementedError):
-        report.flag_disagreements((), {})
-    with pytest.raises(NotImplementedError):
-        report.watchlist((), None, load_rules(warn=False))
+
+# == The two judgements, Chintamani's tests ================================================
+
+RULES = load_rules(RunPaths.default().rules, warn=False)
+ROW_DAY = dt.date(2026, 10, 13)
+
+
+def make_row(symbol: str, *, mwpl: int, futeq_oi: float, barred: bool) -> MwplRow:
+    """A valid synthetic row: an INE000 ISIN (the CI scan's synthetic prefix), and NSE's
+    headroom as NSE publishes it - truncated - for a free row, None for a barred one."""
+    isin = f"INE000{sum(map(ord, symbol)) % 100000:05d}1"
+    headroom = None if barred else math.floor(RULES.value(report.ENTRY_KEY) * mwpl - futeq_oi)
+    return MwplRow(trade_date=ROW_DAY, isin=isin, scrip_name=f"{symbol} LTD", symbol=symbol,
+                   mwpl=mwpl, notional_oi=math.ceil(futeq_oi), futeq_oi=float(futeq_oi),
+                   no_fresh_positions=barred, headroom_shares=headroom)
+
+
+# ---------------------------------------------------------------- flags
+
+def test_a_disagreement_is_named():
+    row = make_row("AAACO", mwpl=1_000_000, futeq_oi=500_000, barred=True)
+    result = flag_disagreements([row], {row.isin: ("AAACO", False)})
+    (d,) = result.disagreements
+    assert d.symbol == "AAACO"
+    assert d.nse_flag is True                # NSE: banned
+    assert d.forecast is False               # ours: free
+    assert result.agreed == 0
+
+
+def test_disagreements_are_in_symbol_order():
+    # make_row derives the ISIN from the symbol, so these two symbols are chosen for an ISIN
+    # order that is the reverse of their symbol order. The setup assertion proves it.
+    late = make_row("AZZCO", mwpl=1_000_000, futeq_oi=500_000, barred=True)
+    early = make_row("BAACO", mwpl=1_000_000, futeq_oi=500_000, barred=True)
+    rows = [late, early]
+    by_isin = [r.symbol for r in sorted(rows, key=lambda r: r.isin)]
+    assert by_isin != ["AZZCO", "BAACO"], "setup: ISIN order must differ from symbol order"
+
+    result = flag_disagreements(
+        rows, {late.isin: ("AZZCO", False), early.isin: ("BAACO", False)})
+    assert [d.symbol for d in result.disagreements] == ["AZZCO", "BAACO"]
+
+
+def test_a_stored_none_forecast_is_not_compared():
+    row = make_row("AAACO", mwpl=1_000_000, futeq_oi=500_000, barred=False)
+    result = flag_disagreements([row], {row.isin: ("AAACO", None)})
+    assert result.disagreements == ()
+    assert result.agreed == 0
+    assert [n.why for n in result.not_compared] == ["forecast refused"]
+
+
+def test_a_missing_forecast_is_not_compared():
+    row = make_row("AAACO", mwpl=1_000_000, futeq_oi=500_000, barred=False)
+    result = flag_disagreements([row], {})
+    assert result.agreed == 0
+    assert [n.why for n in result.not_compared] == ["forecast refused"]
+
+
+def test_a_forecast_with_no_row_is_not_compared():
+    row = make_row("AAACO", mwpl=1_000_000, futeq_oi=500_000, barred=False)
+    result = flag_disagreements([], {row.isin: ("AAACO", False)})
+    assert result.agreed == 0
+    assert [n.why for n in result.not_compared] == ["no row in D's combineoi"]
+
+
+# ---------------------------------------------------------------- watchlist
+
+def test_exactly_95_free_is_in_the_watchlist():
+    # Entry is strictly "above": 95.00% doesn't enter, so it's in the band.
+    row = make_row("EDGECO", mwpl=1_000_000, futeq_oi=950_000, barred=False)
+    (entry,) = watchlist([row], {row.isin: False}, RULES)
+    assert entry.state is WatchState.FREE
+    assert entry.points_to_exit is None and entry.must_fall_by is None
+    assert entry.headroom is not None
+
+
+def test_exactly_80_banned_is_not_in_the_watchlist():
+    # Exit is "at or below": 80.00% releases, so it's outside the band.
+    row = make_row("RELEASECO", mwpl=1_000_000, futeq_oi=800_000, barred=True)
+    assert watchlist([row], {row.isin: True}, RULES) == ()
+
+
+def test_banned_in_band_shows_must_fall_by_only():
+    row = make_row("HOLDCO", mwpl=1_000_000, futeq_oi=850_000, barred=True)
+    (entry,) = watchlist([row], {row.isin: True}, RULES)
+    assert entry.state is WatchState.BANNED
+    assert entry.must_fall_by == 850_000 - RULES.value("single_stock.ban.exit_utilisation") * 1_000_000
+    assert entry.headroom is None and entry.points_to_entry is None
+
+
+def test_unknown_state_gets_both_distances():
+    row = make_row("MIDCO", mwpl=1_000_000, futeq_oi=880_000, barred=False)
+    (entry,) = watchlist([row], None, RULES)
+    assert entry.state is WatchState.UNKNOWN
+    assert entry.must_fall_by is not None and entry.headroom is not None
+
+
+def test_free_headroom_is_exact_not_truncated():
+    # A fractional OI leaves a fraction in the exact headroom; NSE truncates it.
+    row = make_row("FREECO", mwpl=1_000_000, futeq_oi=870_000.25, barred=False)
+    (entry,) = watchlist([row], {row.isin: False}, RULES)
+    gap = entry.headroom - entry.nse_headroom
+    assert 0 < gap < 1                       # strictly above 0: the fraction survived
+    assert gap == pytest.approx(0.75)

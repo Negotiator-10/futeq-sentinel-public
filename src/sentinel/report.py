@@ -3,7 +3,7 @@
 Nothing here recomputes a run. Every figure comes from what the run for D stored, so the same
 store always renders the same report, and a crash after the run committed costs nothing. The
 two judgements the report makes - which scrips disagree with NSE's flag, and how far each
-in-band scrip is from the line that applies to it - are rule logic and are Chintamani's:
+in-band scrip is from the line that applies to it - are rule logic and Chintamani wrote them:
 `flag_disagreements()` and `watchlist()` below. Everything else is layout.
 
 Sections, in #019's order:
@@ -34,6 +34,7 @@ from enum import Enum
 from pathlib import Path
 
 from sentinel.calendar import ChainUnverifiedError, UnknownDateError, load_calendar
+from sentinel.engine import headroom_shares, utilisation
 from sentinel.parsers import MwplRow
 from sentinel.rules import Rules, load_rules
 from sentinel.runner import REPO_ROOT, RunPaths
@@ -51,7 +52,7 @@ GOVERNS = "NSE's determination governs; the engine's figure is under investigati
 NOT_REPRODUCIBLE = "uncommitted changes when it ran, so this report is not reproducible"
 
 
-# == Chintamani's: the two judgements ======================================================
+# == The two judgements: Chintamani's ======================================================
 
 
 @dataclass(frozen=True)
@@ -80,20 +81,53 @@ def flag_disagreements(
     rows: tuple[MwplRow, ...],
     forecasts: Mapping[str, tuple[str, bool | None]],
 ) -> FlagComparison:
-    """Compare NSE's flag on D's rows with the run's forecast for D+1.  CHINTAMANI'S TO WRITE.
+    """Compare NSE's own next-day declaration with our stored forecast.
 
-    `rows` are D's stored combineoi rows; each row's `no_fresh_positions` is NSE's own
-    declaration for D+1 (#012 decision 5). `forecasts` maps ISIN to `(symbol, forecast)` for
-    D+1, as stored. A refused per-scrip forecast is never written, so a refused scrip is usually
-    ABSENT from `forecasts`; `forecast` is None only where D+1 has a row with no forecast in it.
-    Treat both as "no forecast".
+    For each scrip, NSE's `no_fresh_positions` flag in D's combineoi is its
+    declaration for D+1; the runner's forecast for D+1 is ours. The engine
+    never reads the flag to compute anything, so the comparison is clean.
 
-    Agreed readings (10 Nov):
-      - a disagreement is a scrip where the flag and the forecast differ;
-      - a scrip whose forecast was refused is NOT COMPARED, not counted as agreeing;
-      - a scrip with a forecast but no row in D's combineoi is also NOT COMPARED.
+    "Not compared", never counted as agreeing:
+      - a refused forecast: the ISIN is missing from `forecasts`, or its
+        stored forecast is None;
+      - a forecast with no row in D's combineoi.
+
+    Output is in symbol order, for the reader.
     """
-    raise NotImplementedError("flag_disagreements() is Chintamani's to write")
+    nse_flag = {r.isin: (r.symbol, r.no_fresh_positions) for r in rows}
+
+    agreed = 0
+    disagreements = []
+    not_compared = []
+
+    def symbol_of(isin: str) -> str:
+        if isin in nse_flag:
+            return nse_flag[isin][0]
+        return forecasts[isin][0]
+
+    for isin in sorted(set(nse_flag) | set(forecasts), key=symbol_of):
+        ours = forecasts.get(isin)            # always (symbol, forecast) when present
+        if ours is None or ours[1] is None:
+            # A refused forecast: absence is stated, never counted as agreement.
+            not_compared.append(NotCompared(isin, symbol_of(isin), "forecast refused"))
+            continue
+        if isin not in nse_flag:
+            not_compared.append(
+                NotCompared(isin, symbol_of(isin), "no row in D's combineoi"))
+            continue
+
+        symbol, nse_banned = nse_flag[isin]
+        if ours[1] == nse_banned:
+            agreed += 1
+        else:
+            disagreements.append(Disagreement(
+                isin=isin, symbol=symbol, nse_flag=nse_banned, forecast=ours[1]))
+
+    return FlagComparison(
+        disagreements=tuple(disagreements),
+        not_compared=tuple(not_compared),
+        agreed=agreed,
+    )
 
 
 class WatchState(Enum):
@@ -115,26 +149,62 @@ class WatchEntry:
     nse_headroom: int | None        # NSE's published headroom for the row, if it has one
 
 
+ENTRY_KEY = "single_stock.ban.entry_utilisation"
+EXIT_KEY = "single_stock.ban.exit_utilisation"
+
+
 def watchlist(
     rows: tuple[MwplRow, ...],
     official: Mapping[str, bool] | None,
     rules: Rules,
 ) -> tuple[WatchEntry, ...]:
-    """Every scrip in the 80-95% band, with its distance to the line that applies.  CHINTAMANI'S.
+    """Every scrip in the band where yesterday's state decides tomorrow:
+    above the exit line and not above the entry line.
 
-    `rows` are D's stored combineoi rows. `official` maps ISIN to D's official ban state, or is
-    None when D's ban list was missing; an ISIN absent from it has no official state either.
-    Thresholds come from `rules`, never literals (#009).
+    Each entry gives the distance to the line that applies to it:
+      - BANNED: to the exit, as how much OI must fall ("must fall by").
+        Falling by exactly that lands on the exit line, which releases,
+        because exit is "at or below".
+      - FREE: to the entry, as our exact headroom, the figure the
+        reconciliation compares with NSE's truncated one.
+      - UNKNOWN (D's ban list missing, or no official value for the
+        scrip): both distances, rather than guessing a line.
 
-    Agreed readings (10 Nov), item 9 - no new threshold:
-      - a banned scrip: points above the 80% exit, and the shares OI must fall to reach it,
-        labelled "must fall by";
-      - a free scrip: points below the 95% entry, and our exact headroom in shares, which the
-        report notes against NSE's published figure (within [0, 1) when they match);
-      - unknown state: both, and the state said to be unknown rather than guessed.
-    Order is yours to choose; the report prints the entries in the order given.
+    Thresholds and their directions come from rules.yaml, never literals.
     """
-    raise NotImplementedError("watchlist() is Chintamani's to write")
+    entry = rules.value(ENTRY_KEY)
+    exit_ = rules.value(EXIT_KEY)
+    entries = []
+
+    for r in sorted(rows, key=lambda r: r.symbol):
+        u = utilisation(r.futeq_oi, r.mwpl)
+        if rules.compare(ENTRY_KEY, u) or rules.compare(EXIT_KEY, u):
+            continue                       # outside the band: tomorrow is already decided
+
+        in_ban = None if official is None else official.get(r.isin)
+        if in_ban is None:
+            state = WatchState.UNKNOWN
+        elif in_ban:
+            state = WatchState.BANNED
+        else:
+            state = WatchState.FREE
+
+        to_exit = state is not WatchState.FREE      # banned or unknown
+        to_entry = state is not WatchState.BANNED   # free or unknown
+
+        entries.append(WatchEntry(
+            isin=r.isin,
+            symbol=r.symbol,
+            utilisation=u,
+            state=state,
+            points_to_exit=(u - exit_) * 100 if to_exit else None,
+            must_fall_by=r.futeq_oi - exit_ * r.mwpl if to_exit else None,
+            points_to_entry=(entry - u) * 100 if to_entry else None,
+            headroom=headroom_shares(r, rules) if to_entry else None,
+            nse_headroom=r.headroom_shares,          # None for a barred row
+        ))
+
+    return tuple(entries)
 
 
 # == Layout =================================================================================

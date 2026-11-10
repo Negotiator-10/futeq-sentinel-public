@@ -260,13 +260,13 @@ def _row6(paths, day, calendar, rules, official_banned,
     missing = [p.name for p in (paths.delta(day), paths.delta(prev), paths.book)
                if not p.exists()]
     if missing:
-        return refuse(f"missing: {missing}")
+        return refuse("missing: " + ", ".join(missing))
 
     books = load_books(paths.book)
     absent = [str(d) for d in (prev, day) if d not in books]
     if absent:
         # Never books.get(): a missing day must not pass as flat (#015).
-        return refuse(f"no prop book for {absent}")
+        return refuse("no prop book for " + ", ".join(absent))
 
     return check_ban_period_reduction(
         today=books[day],
