@@ -120,6 +120,77 @@ Append only. Each entry: the decision, why, the evidence, and the outcome.
 - **Outcome:** accepted. Five files downloaded by hand on 2 Nov; checksums and column maps in
   `docs/READING.md`.
 
+## #010 addendum: automated acquisition ruled out, 10 Nov 2026
+
+**What.** NSE files stay manually downloaded unless NSE gives written
+permission. v1.0 adds an **importer**, not a downloader: I download each
+file by hand into `data/`; the importer checks its heading date and
+checksum, records provenance, and reports which files for day D are
+still missing. The runner does not change.
+
+NSE content is also kept out of the public repository: fixtures built
+from NSE rows are replaced by checksums plus builder scripts, and CI
+runs on small synthetic fixtures written by hand.
+
+**Why.** The original #010 reasons were technical: NSE blocks scripted
+requests. Re-reading NSE's terms of use shows the stronger reason is
+contractual: automated collection is prohibited outright, with no
+route to consent. Any workaround, including driving a real browser,
+would still be automated collection, and would also defeat the block
+NSE uses to enforce its terms.
+
+**Evidence.**
+- **Terms of use, para 9** (nseindia.com/static/nse-terms-of-use,
+  read 10 Nov 2026): prohibits "systematic or automated data
+  collection activities (including scraping". Other NSE sites' terms
+  (the investor helpline and the NSE Data portal) allow automated
+  access with written consent; the main site's terms offer no consent
+  route.
+- **Terms of use, para 8:** NSE content may not be reproduced, uploaded
+  or posted without prior written permission. This affects publishing
+  NSE rows in `tests/fixtures/`. Para 8 also bars use of NSE data for
+  "gaming, virtual trading or simulation activities".
+- **Para 8 also covers storage:** content shall not be "stored (either
+  in hardcopy or in an electronic retrieval system)". Its next sentence
+  begins "Unless the information or Content is available for download".
+  The files used here are offered by NSE for download, which is what
+  keeping local copies in `data/` and the store relies on. Those copies
+  stay local and are never published.
+- **Technical:** www.nseindia.com returns 403 to an honest user-agent;
+  archive URLs accept a connection and send nothing (tarpitted).
+  Retries against a tarpit would only fail slowly every night.
+- **robots.txt allows `/`.** That is a convention for crawlers; the
+  terms of use are the contract, and they prohibit automated collection.
+- **Not tested:** no scripted request was made against the archive to
+  check the terms, because running the test would itself break para 9.
+
+**Consequences.**
+1. v1.0 acquisition: manual download plus importer.
+2. Retries are dropped entirely (#019 item 12): there is no downloader
+   to retry.
+3. The year-long replay is limited by how many files I download by
+   hand. Scope decided Thursday.
+4. Before the repo goes public, NSE content leaves the fixtures and the
+   git history: the combineoi rows (three files) and the 22 fo_secban
+   copies. The SEBI Table 2 book, the hand-made empty ban list and the
+   illustrative hand calculations stay. Published as a fresh public
+   repository built from filtered history; this repository stays private
+   as the full record.
+5. The README describes the prop book as a test harness with synthetic
+   positions for checking compliance logic, not a trading or
+   simulation system. My reading is that para 8's simulation wording
+   targets paper-trading games, but the description should leave no
+   doubt.
+6. Optional: written permission can be requested from
+   nsewebmaster@nse.co.in. Nothing depends on the answer.
+
+**Not legal advice.** These are my reading of NSE's published terms
+for a portfolio project; a commercial use would need a licence through
+NSE's data vendor.
+
+**Outcome.** Accepted, 10 Nov 2026. v0.1 tagged privately; published
+once the fixtures are replaced and the filtered history is verified.
+
 ## #011: Ban state between days, 2 to 4 Nov 2026
 <!-- Authorship, recorded for the same reason it is recorded in SPEC.md and rules.yaml.
      The reasoning in all four answers is mine, worked out against the data on 2 and 4 Nov.
@@ -1247,6 +1318,13 @@ forecast D+1, reconcile, row 6, report.
 11. **Re-runs:** identical inputs give identical results. A changed
     input refuses, naming the file and both checksums. Supersede and
     the stale-day cascade move to v1.0.
+12. **No retries in the runner.** PLAN.md's "retries with backoff" is
+    dropped: there is no downloader, and there will not be one,
+    because NSE's terms of use prohibit automated collection (#010
+    addendum). v1.0 adds an importer instead: I download each file by
+    hand into `data/`, and the importer verifies its heading date and
+    checksum. The runner reads `data/` either way, so it does not
+    change.
 
 **Why.** Every piece applies a rule already in the project: missing
 inputs are stated, never inferred (#011, #015); nothing derived is
