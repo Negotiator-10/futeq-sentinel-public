@@ -10,11 +10,14 @@ The checking is the point. Anyone can write a script that reads an exchange file
 to know was whether my reading of the regulation was right, and the only honest way to find out
 was to reproduce numbers NSE publishes independently and see where I disagreed.
 
-Status: in progress. "What it does not do yet", below, is the accurate summary. Release dates
-live in `PLAN.md` and I have deliberately not repeated them here — a date in two files is a date
-that goes stale in one of them, which has already happened once in this one.
+Status: v0.1. One command runs a trading day end to end and a second renders that day's report
+from what the run stored. "What it does not do yet", below, is the accurate summary of the rest.
+Release dates live in `PLAN.md` and I have deliberately not repeated them here — a date in two
+files is a date that goes stale in one of them, which has already happened once in this one.
 
-All positions are synthetic. Nothing here is investment advice, and no orders are sent anywhere.
+The prop book is a test harness: synthetic positions that exist only to check the compliance
+logic against the rules. It is not a trading or simulation system and holds no one's real
+positions. Nothing here is investment advice, and no orders are sent anywhere.
 
 ## What it reproduces, and how closely
 
@@ -93,13 +96,22 @@ Stated plainly, because the thing above is the only claim I want read as finishe
   next-day ban determination in the same file the engine computes from, so there is no lead of
   any size. What this does is reproduce the exchange's determination independently and reconcile
   against it. That is narrower than "forecasting", and it is deliberately the word I use.
-* **Neither boundary has been tested at the boundary.** 95.01% is not 95.00%, and no row in the
-  sample has sat exactly on 95% or 80%. The inclusivity — strict at entry, inclusive at exit — is
-  proven by unit tests, not by data, and may never be provable by data.
-* **No run has been made with a missing prior state.** Every scored day had its seed.
-* **Acquisition is manual.** NSE returns 403 to a plain HTTP client and tarpits its archive
-  paths, so every file in this repository's `data/` was downloaded by hand with its checksum
-  recorded. There is no downloader yet (`DECISIONS.md` #010).
+* **Neither boundary has been tested at the boundary on real data.** 95.01% is not 95.00%, and no
+  real row has sat exactly on 95% or 80%. The inclusivity — strict at entry, inclusive at exit —
+  is tested end to end on synthetic files with made-up scrips placed exactly on each line, through
+  the same parsers, engine and runner. That is a test of my code, not evidence from NSE, and the
+  real data may never provide it.
+* **A missing prior state has only been run on synthetic files.** Every real scored day had its
+  seed. The runner's handling of a missing ban list — refusing only the in-band forecasts, D-1's
+  score and row 6 — is tested on the synthetic window, not on a real gap.
+* **Row 6 has never run inside a real day.** On 4 November, the one real day the runner has been
+  run on, row 6 refuses: there is no prop book and no `Contract_Delta` file for 3 or 4 November.
+  The report says "Refused", not "0 breaches".
+* **Acquisition is manual, and will stay manual.** NSE's terms of use (para 9) prohibit systematic
+  or automated data collection, and the main site offers no consent route, so I download every
+  file by hand and record its checksum. v1.0 adds an importer that checks what I download; there
+  will be no downloader (`DECISIONS.md` #010 addendum). NSE's files never enter this repository,
+  not even as test fixtures.
 * **Special sessions chain only on evidence.** Muhurat trading on Sunday 8 November 2026 is a
   session on a day that is not a normal trading day. The calendar refused to chain through it
   until 9 November, when NSE's own Sunday files showed a full end-of-day cycle; it is now
@@ -112,7 +124,7 @@ Python 3.12.
 
 ```
 pip install -e ".[dev]"
-pytest                        # 410 tests; 32 skip without NSE's files in data/
+pytest                        # 459 tests; 33 skip without NSE's files in data/
 python scripts/score_bans.py  # reproduces the full score from the files in data/
 ```
 
@@ -132,6 +144,36 @@ build their fixtures from `data/` with `scripts/build_nse_fixtures.py`, check ev
 **Commits before 10 Nov 2026 won't run their tests.** The public repository's history was
 filtered to remove NSE's files, so those commits refer to fixtures that are no longer in it.
 
+## Running a day
+
+```
+python -m sentinel.runner 2026-11-04    # exit 0 COMPLETED, 2 REFUSED, 1 FAILED
+python -m sentinel.report 2026-11-04    # writes reports/2026-11-04.md from the store
+```
+
+The runner reads that day's files from `data/`, computes the whole day in memory and writes it to
+the store in one transaction: NSE's measurements, the reconciliation, the day's official ban
+state, the forecast for the next trading day, and row 6. A crash leaves nothing of the day
+behind. A run log outside that transaction records every run — its input checksums, the commit
+and whether the working tree was clean, the rules and calendar checksums, and which rules it used
+on an assumption — so even a failed run says what it was and why it failed.
+
+It refuses rather than guesses. The whole run refuses on a holiday, an unknown date, an unverified
+special session, a missing `combineoi` file, or a banned symbol it cannot resolve. A missing ban
+list refuses only what depends on it, and the rest of the day still runs. Every refusal is stored
+with its reason, so "refused" and "not run" are never the same record.
+
+The report is rendered from the store and the run log alone, in a fixed order: refusals, where
+the engine disagrees with NSE's own flag, row 6 breaches, tomorrow's ban, the 80–95% watchlist
+with each scrip's distance to the line that applies to it, the checks that passed, and an audit
+footer. A refused section says "Refused" and why. A run from uncommitted code is marked "not
+reproducible".
+
+Two sample reports are in `docs/sample_reports/`: an ordinary day, and a day whose ban list is
+missing. Both are rendered from the synthetic window by `scripts/render_sample_reports.py`, never
+from a real day, because a real report quotes NSE's own figures and NSE's content stays out of
+this repository.
+
 ## How it is put together
 
 | | |
@@ -142,6 +184,11 @@ filtered to remove NSE's files, so those commits refer to fixtures that are no l
 | `src/sentinel/engine.py` | utilisation, headroom, ban state, reconciliation |
 | `src/sentinel/store.py` | point-in-time ban state, keyed on ISIN and date |
 | `src/sentinel/ingest.py` | loads published files into the store; a re-run is a no-op |
+| `src/sentinel/book.py` | the synthetic prop book: positions keyed on `(tm, ucc)`, and a flat day as a marker row |
+| `src/sentinel/entities.py` | who holds which account, date-effective, for the entity limits |
+| `src/sentinel/runlock.py` | one run at a time, with a lock the operating system releases if the run dies |
+| `src/sentinel/runner.py` | one trading day end to end, in one transaction, refusing per stage |
+| `src/sentinel/report.py` | the day's report, rendered from the store and the run log only |
 
 Two conventions run through all of it.
 
@@ -162,9 +209,9 @@ read forward — enforced by the API, which has no method that returns a forecas
 
 * `SPEC.md` — sixteen rule rows, each with its circular, paragraph, function name and named test
   case. Rows marked `UNVERIFIED` are ones I could not confirm against a primary source.
-* `DECISIONS.md` — thirteen decisions, each with what, why, evidence, the alternatives rejected
+* `DECISIONS.md` — nineteen decisions, each with what, why, evidence, the alternatives rejected
   and the outcome. #011 is why ban state needs yesterday's answer; #012 is the store; #013 is the
-  calendar.
+  calendar; #019 is the runner; the #010 addendum is why acquisition stays manual.
 * `docs/READING.md` — every source, every downloaded file with its sha256, and the file-format
   traps.
 * `LEARNING.md` — what I got wrong and what it taught me, including the first version of the
