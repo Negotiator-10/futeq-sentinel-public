@@ -219,6 +219,8 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `combineoi_03112026.zip` | 22,197 | `a3d4684b259f70ca7f3221e9df228f8527262dbb055dca7c951ef37db7f8a9be` |
 | `combineoi_04112026.zip` | 22,230 | `e30c75145054f23b23f67a1ce054197b697ef9eadd9fbfc0680c9842d5e692a0` |
 | `combineoi_05112026.zip` | 22,227 | `9a29fff3a287f474511061be17893e3c933fb2e1875fd34bf8a1f6c5265e5656` |
+| `combineoi_30092026.zip` | 21,721 | `677053ce0b6a4c59cfb048e28e907794231d5bae41bd89e839f020c8c482eba5` |
+| `combineoi_01102026.zip` | 21,682 | `460f6a8e615bbb25c4566593ab4f4bd28127a1005e52d3e5c962f3cc511e90f5` |
 
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
@@ -566,6 +568,31 @@ shares, OI in shares. MWPL and both OI columns are share counts; FutEq OI is fra
 - **`Limit for Next Day` = 0.95 x MWPL - FutEq OI**, exact on 216 of 216 numeric rows (median
   residual 0.5 share, rounding). It does **not** reconcile against notional OI: 0 of 216. So
   NSE's own headroom is computed on the futures-equivalent basis, not the notional one.
+
+### MWPL resets on the first trading day of the quarter: October observed (10 Nov 2026)
+
+Every scrip's MWPL compared across the 18 `combineoi` files in `data/`, 26 Aug to 8 Nov 2026:
+
+| Files | Scrips whose MWPL changed |
+|---|---|
+| 26 Aug -> 30 Sep | 0 of 210 |
+| **30 Sep -> 1 Oct** | **158 of 213** |
+| 1 Oct -> 12 Oct, and every pair after it to 8 Nov | 0 |
+
+So MWPL is recalculated once, overnight, effective **Thu 1 Oct 2026**, the first trading day of
+the quarter (2 Oct was a holiday), and holds still between resets. The evidence is the two files
+either side: `combineoi_30092026.zip` (sha256 `677053ce...eba5`) and `combineoi_01102026.zip`
+(sha256 `460f6a8e...90f5`), full hashes in the table above. SEBI 2025/79 para 5.2.4 says
+"quarterly" and names no months, so this is an **observation, not a circular**, and it covers
+**October only**. `rules.yaml`'s `reset_calendar: [1, 4, 7, 10]` stays an assumption for January,
+April and July until each is seen the same way.
+
+Open: **55 of 213 scrips kept the same MWPL across the reset.** A recalculation on rolling
+three-month ADDV would move almost every limit, so something else binds for those 55. Which of
+MWPL's limbs binds is already on the gaps list in `LEARNING.md`.
+
+Also seen in the same comparison: 3 scrips added and 1 removed between 26 Aug and 30 Sep, and 6
+added on 28 Oct - changes to the F&O list itself, which the reference-data detector is for.
 
 ## `combineoi_deleq_<ddmmyyyy>.csv` — delta-equivalent OI, stocks and indices
 `Date, ISIN, Scrip Name, Symbol, Notional Open Interest, Portfolio-wise Futures Equivalent Open
