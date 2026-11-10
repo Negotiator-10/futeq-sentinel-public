@@ -357,5 +357,22 @@ a missing prior state, and a new scrip near a line.
   collection, so v1.0 gets an importer, not a downloader. A filtered public
   copy of the repository is built and scans clean; it waits for the v0.1 tag.
 
-**Next:** the report renderer from the store, the README for v0.1, the
-private v0.1 tag, then the public rebuild and the scan before I push it.
+- **The daily report** (`2bf2e6f`, `c61c92c`). `python -m sentinel.report D`
+  renders the day from the store and the run log only, in #019's order. A
+  refused section says "Refused", never zero. Claude built the layout around
+  two functions I wrote: `flag_disagreements()` and `watchlist()`. Eleven
+  mutations to them, all caught, after three gaps in my first tests (a
+  truncated headroom, swapped flags, symbol order) were fixed.
+- **v0.1 shipped, a day early.** The README leads with the score, says what
+  is still untested, and calls the prop book a test harness. Two sample
+  reports are rendered from the synthetic window, never a real day. Tagged
+  `v0.1` privately at `726c875`.
+- **Public:** github.com/Negotiator-10/futeq-sentinel-public. A filtered copy
+  of this repository, with no NSE content in any commit, and my author email
+  mapped to my GitHub noreply address. Its CI badge points at its own
+  workflow, and the sample footers carry the public hash. The full scan is
+  clean, and CI passed on its first run: 426 passed, 33 skipped.
+
+**Next:** Wed 11 Nov, the Week 2 teach-back, and v0.1 in the Citco,
+JPMorgan and Anand Rathi applications. Thu 12 Nov, before any Week 3 code:
+how many days I will download by hand for the replay, and the scope cuts.
