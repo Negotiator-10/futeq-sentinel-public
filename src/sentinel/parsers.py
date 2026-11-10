@@ -54,7 +54,7 @@ class MwplRow:
 
     `mwpl` and `notional_oi` are share counts and whole. `futeq_oi` is **not** - it is a sum
     of delta-weighted positions and deltas are `N(d1)`, so it arrives fractional
-    (REDACTED). Annotating it `int` would be a lie that a type checker believes.
+    (to eight decimal places in the file). Annotating it `int` would be a lie that a type checker believes.
     """
 
     trade_date: dt.date

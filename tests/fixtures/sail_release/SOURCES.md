@@ -1,7 +1,9 @@
 # Provenance for `tests/fixtures/sail_release/`
 
-Built by `scripts/build_sail_fixture.py` from the files in `data/`, which is gitignored. Derived
-data: rerun the builder, never edit by hand. The same hashes are in `docs/READING.md`.
+**The fixture files are not in this directory.** They are NSE content, so they are built from
+the files in `data/` (gitignored) by `scripts/build_nse_fixtures.py`, at test time by
+`tests/conftest.py`, and never committed (`DECISIONS.md` #010 addendum). The hash of every built
+file is in `tests/fixtures/nse_built.sha256`. The same input hashes are in `docs/READING.md`.
 
 SAIL's walk out of the ban, 2 to 6 Nov 2026. `combineoi_rows.csv` holds **SAIL's row only** from
 each of five `combineoi` files - one row selected per file, copied as NSE published the strings.

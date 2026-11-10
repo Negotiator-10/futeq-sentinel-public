@@ -2,17 +2,17 @@
 
 Grouped by what each one defends:
 
-* **the arithmetic** - that utilisation and headroom are the formulas the circulars state,
-  on numbers taken from real NSE rows rather than invented ones;
+* **the arithmetic** - that utilisation and headroom are the formulas the circulars state;
 * **the boundaries** - that 95% and 80% keep their opposite inclusivity, and that neither
   direction is written in Python;
 * **what reconcile() refuses** - the inputs it will not silently accept;
 * **the holes** - two tests that document a limitation rather than a guarantee, so the
   limitation fails loudly if the representation ever changes.
 
-The real-number fixtures below are from `combineoi_30102026`, recorded in `DECISIONS.md`
-#011 and in the comment block at the top of `engine.py`. They are kept as literals here
-rather than read from `data/` because `data/` is gitignored and CI has no copy of it.
+Every number here is synthetic, built to have the property each test is about: NSE's content
+stays out of the repository (`DECISIONS.md` #010 addendum). The same checks on NSE's real
+30 Oct rows - SAIL held at 84.93% while BANDHANBNK traded freely at 85.98%, 360ONE's
+headroom - run in `tests/test_nse_local.py`, which reads them from `data/` and skips without it.
 """
 
 from __future__ import annotations
@@ -77,30 +77,31 @@ def test_utilisation_is_a_fraction_not_a_percentage():
     assert utilisation(500_000.0, 1_000_000) == 0.5
 
 
-def test_utilisation_matches_the_real_sail_row():
-    # SAIL on 30 Oct: the row that proved ban status is a state, not a measurement.
-    u = utilisation(REDACTED, REDACTED)
+def test_utilisation_of_a_held_row():
+    # Shaped like SAIL on 30 Oct (84.93%), the row that proved ban status is a state.
+    u = utilisation(169_860_000.123, 200_000_000)
     assert round(u, 4) == 0.8493
 
 
-def test_utilisation_matches_the_real_bandhanbnk_row():
-    # Higher utilisation than SAIL on the same day, and NOT barred. Kept beside the SAIL
-    # test because the pair is the evidence for the three-argument is_in_ban() in #011.
-    u = utilisation(REDACTED, REDACTED)
+def test_utilisation_of_a_free_row_above_the_held_one():
+    # Shaped like BANDHANBNK on 30 Oct (85.98%): higher than the held row, and NOT barred. The
+    # pair is the evidence for the three-argument is_in_ban() in #011.
+    u = utilisation(128_970_000.5, 150_000_000)
     assert round(u, 4) == 0.8598
-    assert u > utilisation(REDACTED, REDACTED)
+    assert u > utilisation(169_860_000.123, 200_000_000)
 
 
-def test_headroom_is_the_published_formula_on_the_real_360one_row(rules):
-    # 360ONE on 30 Oct. NSE published REDACTED; the exact figure is REDACTED.2195.
-    row = make_row("360ONE", mwpl=REDACTED, futeq_oi=REDACTED, headroom_shares=REDACTED)
-    assert round(headroom_shares(row, rules), 4) == REDACTED.2195
+def test_headroom_is_the_published_formula(rules):
+    # Shaped like 360ONE on 30 Oct: NSE publishes the truncated figure, 51,999,999 here; the
+    # exact one is 51,999,999.2195.
+    row = make_row("HEADCO", mwpl=60_000_000, futeq_oi=5_000_000.7805, headroom_shares=51_999_999)
+    assert round(headroom_shares(row, rules), 4) == 51_999_999.2195
 
 
 def test_headroom_is_not_truncated(rules):
     # Truncating to match NSE would drive every residual to zero and destroy the one thing
     # reconcile() measures. The fractional part IS the measurement.
-    row = make_row("360ONE", mwpl=REDACTED, futeq_oi=REDACTED, headroom_shares=REDACTED)
+    row = make_row("HEADCO", mwpl=60_000_000, futeq_oi=5_000_000.7805, headroom_shares=51_999_999)
     got = headroom_shares(row, rules)
     assert got != int(got)
 
@@ -108,7 +109,7 @@ def test_headroom_is_not_truncated(rules):
 def test_headroom_multiplies_rather_than_dividing(rules):
     # NSE's published column is 0.95 * MWPL - FutEq OI. Matching that arithmetic shape keeps a
     # floating-point difference out of the residual. This asserts the shape, not just the value.
-    row = make_row(mwpl=REDACTED, futeq_oi=REDACTED)
+    row = make_row(mwpl=60_000_000, futeq_oi=5_000_000.7805)
     entry = rules.value("single_stock.ban.entry_utilisation")
     assert headroom_shares(row, rules) == entry * row.mwpl - row.futeq_oi
 
@@ -176,7 +177,7 @@ def test_a_barred_scrip_at_exactly_80_percent_is_released_not_held(rules):
 
 def test_reconcile_agrees_on_a_truncated_row(rules):
     # NSE truncates down, so its figure is at or below ours and the residual lands in [0, 1).
-    row = make_row("360ONE", mwpl=REDACTED, futeq_oi=REDACTED, headroom_shares=REDACTED)
+    row = make_row("HEADCO", mwpl=60_000_000, futeq_oi=5_000_000.7805, headroom_shares=51_999_999)
     rec = reconcile((row,), rules)
 
     assert rec.ok
@@ -188,28 +189,28 @@ def test_reconcile_agrees_on_a_truncated_row(rules):
 def test_reconcile_splits_barred_rows_from_comparable_ones(rules):
     rows = (
         make_row("A", headroom_shares=550_000),
-        make_row("KAYNES", mwpl=REDACTED, futeq_oi=REDACTED,
+        make_row("LATCHCO", mwpl=5_000_000, futeq_oi=4_608_500.5,
                  no_fresh_positions=True, headroom_shares=None),
         make_row("B", headroom_shares=550_000),
-        make_row("SAIL", mwpl=REDACTED, futeq_oi=REDACTED,
+        make_row("HELDCO", mwpl=200_000_000, futeq_oi=169_860_000.123,
                  no_fresh_positions=True, headroom_shares=None),
     )
     rec = reconcile(rows, rules)
 
     assert rec.rows_total == 4
     assert rec.rows_total == len(rec.residuals) + len(rec.barred)
-    assert [b.symbol for b in rec.barred] == ["KAYNES", "SAIL"]
+    assert [b.symbol for b in rec.barred] == ["LATCHCO", "HELDCO"]
     assert all(b.held for b in rec.barred)
     assert rec.ok
 
 
-def test_both_real_barred_rows_are_held_by_the_exit_threshold_not_the_entry_one(rules):
-    # KAYNES 92.17% and SAIL 84.93% on 30 Oct. Both barred, NEITHER above 95%. An
-    # entry-threshold check here would fail on both, which is the SAIL finding in one test.
+def test_both_barred_rows_are_held_by_the_exit_threshold_not_the_entry_one(rules):
+    # Shaped like KAYNES (92.17%) and SAIL (84.93%) on 30 Oct: both barred, NEITHER above 95%.
+    # An entry-threshold check here would fail on both, which is the SAIL finding in one test.
     rows = (
-        make_row("KAYNES", mwpl=REDACTED, futeq_oi=REDACTED,
+        make_row("LATCHCO", mwpl=5_000_000, futeq_oi=4_608_500.5,
                  no_fresh_positions=True, headroom_shares=None),
-        make_row("SAIL", mwpl=REDACTED, futeq_oi=REDACTED,
+        make_row("HELDCO", mwpl=200_000_000, futeq_oi=169_860_000.123,
                  no_fresh_positions=True, headroom_shares=None),
         make_row("ACOMPARABLEROW", headroom_shares=550_000),
     )
@@ -343,7 +344,7 @@ def test_utilisation_over_a_pandas_column_returns_inf_with_no_warning():
         utilisation(5_000_000.0, 0)
 
     oi = pd.Series([5_000_000.0, 1_234.0])
-    mwpl = pd.Series([REDACTED, 0])
+    mwpl = pd.Series([60_000_000, 0])
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         out = utilisation(oi, mwpl)
@@ -425,11 +426,12 @@ def test_exit_threshold_is_not_applied_when_not_banned(rules):
 
 
 def test_two_scrips_same_utilisation_opposite_state(rules):
-    # SPEC row 5, from the real file. 30 Oct 2026: SAIL at 84.93% was barred while BANDHANBNK
-    # at 85.98% traded freely. The HIGHER utilisation is the free one. No two-argument function
-    # can produce both answers, which is the proof that the third argument is required.
-    sail_oi, sail_mwpl = REDACTED, REDACTED
-    bandhan_oi, bandhan_mwpl = REDACTED, REDACTED
+    # SPEC row 5. On 30 Oct 2026 SAIL at 84.93% was barred while BANDHANBNK at 85.98% traded
+    # freely (the real rows are checked in test_nse_local.py). The HIGHER utilisation is the
+    # free one. No two-argument function can produce both answers, which is the proof that the
+    # third argument is required.
+    sail_oi, sail_mwpl = 169_860_000.123, 200_000_000
+    bandhan_oi, bandhan_mwpl = 128_970_000.5, 150_000_000
 
     assert round(utilisation(sail_oi, sail_mwpl), 4) == 0.8493
     assert round(utilisation(bandhan_oi, bandhan_mwpl), 4) == 0.8598
@@ -514,7 +516,7 @@ def test_bool_cannot_express_an_unknown_previous_state(rules):
     that produces the argument - the point-in-time store - not here, so this test exists to
     keep the hole from being forgotten.
     """
-    sail_oi, sail_mwpl = REDACTED, REDACTED  # 84.93%, inside the dead zone
+    sail_oi, sail_mwpl = 169_860_000.123, 200_000_000  # 84.93%, inside the dead zone
 
     assert is_in_ban(sail_oi, sail_mwpl, was_in_ban_yesterday=True, rules=rules) is True
     assert is_in_ban(sail_oi, sail_mwpl, was_in_ban_yesterday=False, rules=rules) is False

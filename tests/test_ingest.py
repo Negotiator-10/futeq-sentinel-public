@@ -9,8 +9,9 @@ make a re-run safe:
 * loading a *different* file for a day already stored is a conflict, reported with both values,
   because an input that changed under us is a finding rather than something to overwrite.
 
-The fixtures are the real ones in `tests/fixtures/transitions/`, so these tests exercise the
-actual 12-14 Oct transition rather than invented rows.
+The fixtures are the synthetic window in `tests/fixtures/synthetic/window/` (see
+`test_synthetic_window.py` for what each made-up scrip is for): NSE's content stays out of the
+repository (`DECISIONS.md` #010 addendum).
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from sentinel.ingest import (
 from sentinel.rules import load_rules
 from sentinel.store import BanStateStore, Source, StoreError
 
-FIXTURES = Path(__file__).parent / "fixtures" / "transitions"
+FIXTURES = Path(__file__).parent / "fixtures" / "synthetic" / "window"
 
 OCT12 = dt.date(2026, 10, 12)
 OCT13 = dt.date(2026, 10, 13)
@@ -104,7 +105,7 @@ def test_a_days_official_state_is_loaded_for_every_scrip(store, tmp_path, fixtur
     assert result.written == len(fixture_rows[OCT12])
     assert result.unchanged == 0
     banned = store.official_ban_set(OCT12)
-    assert len(banned) == 3                      # AMBUJACEM, BANDHANBNK, LICHSGFIN
+    assert len(banned) == 3                      # HOLDCO, RELEASECO, STICKYCO
     assert len(banned) < result.written           # the free ones are stored too
 
 
@@ -121,9 +122,9 @@ def test_a_banned_symbol_that_cannot_be_resolved_stops_the_run(store, tmp_path, 
     It under-reports a real ban, which is the error direction that gets a desk fined. So the
     run stops rather than skipping the row.
     """
-    thinned = [r for r in fixture_rows[OCT12] if r["symbol"] != "AMBUJACEM"]
+    thinned = [r for r in fixture_rows[OCT12] if r["symbol"] != "HOLDCO"]
     oi = build_combineoi(tmp_path, OCT12, thinned)
-    with pytest.raises(IngestError, match="AMBUJACEM"):
+    with pytest.raises(IngestError, match="HOLDCO"):
         load_official_day(store, FIXTURES / "fo_secban_12102026.csv", oi)
 
 
@@ -158,18 +159,18 @@ def test_a_changed_input_for_a_stored_day_is_a_conflict(store, tmp_path, fixture
     oi = build_combineoi(tmp_path, OCT12, fixture_rows[OCT12])
     load_official_day(store, FIXTURES / "fo_secban_12102026.csv", oi)
 
-    # the 13 Oct list for the 12 Oct date: KAYNES is in ban on the 13th and was not on the 12th
+    # a forged 12 Oct list: ENTRYCO is in ban on the 13th and was not on the 12th
     forged = tmp_path / "forged.csv"
     forged.write_text(
-        "Securities in Ban For Trade Date 12-OCT-2026:\n1,AMBUJACEM\n2,BANDHANBNK\n"
-        "3,KAYNES\n4,LICHSGFIN\n",
+        "Securities in Ban For Trade Date 12-OCT-2026:\n1,ENTRYCO\n2,HOLDCO\n"
+        "3,RELEASECO\n4,STICKYCO\n",
         encoding="utf-8",
     )
     with pytest.raises(StoreError, match="different official value"):
         load_official_day(store, forged, oi)
 
     # and nothing moved: the stored day is still the original
-    assert "KAYNES" not in {r[1] for r in store.scored_forecasts(OCT12) if r[3]}
+    assert "ENTRYCO" not in {r[1] for r in store.scored_forecasts(OCT12) if r[3]}
 
 
 def test_replace_is_available_but_has_to_be_asked_for(store, tmp_path, fixture_rows):
@@ -177,13 +178,13 @@ def test_replace_is_available_but_has_to_be_asked_for(store, tmp_path, fixture_r
     load_official_day(store, FIXTURES / "fo_secban_12102026.csv", oi)
     forged = tmp_path / "forged.csv"
     forged.write_text(
-        "Securities in Ban For Trade Date 12-OCT-2026:\n1,AMBUJACEM\n2,BANDHANBNK\n"
-        "3,KAYNES\n4,LICHSGFIN\n",
+        "Securities in Ban For Trade Date 12-OCT-2026:\n1,ENTRYCO\n2,HOLDCO\n"
+        "3,RELEASECO\n4,STICKYCO\n",
         encoding="utf-8",
     )
     result = load_official_day(store, forged, oi, replace=True)
     assert result.written > 0
-    assert "KAYNES" in {
+    assert "ENTRYCO" in {
         r[1] for r in store.scored_forecasts(OCT12) if r[3]
     }
 
@@ -205,10 +206,10 @@ def test_the_forecast_is_written_into_the_next_trading_days_row(store, tmp_path,
     assert summary.measurement_date == OCT12
     assert summary.effective_date == OCT13
     assert summary.refused_count == 0
-    assert "KAYNES" in summary.forecast_banned          # the 13 Oct entry, at 97.98%
+    assert "ENTRYCO" in summary.forecast_banned         # the 13 Oct entry, at 97.00%
 
     rows = {sym: (f, o) for _, sym, f, o in store.scored_forecasts(OCT13)}
-    assert rows["KAYNES"] == (True, None)               # forecast present, answer not yet loaded
+    assert rows["ENTRYCO"] == (True, None)               # forecast present, answer not yet loaded
 
 
 def test_the_forecast_and_the_answer_meet_in_one_record(store, tmp_path, fixture_rows, rules):
@@ -245,7 +246,7 @@ def test_a_scrip_with_no_prior_state_is_refused_only_inside_the_band(
     # banned symbols is affected, so the load still resolves.
     partial_dir = tmp_path / "partial"
     partial_dir.mkdir()
-    partial = [r for r in fixture_rows[OCT12] if r["symbol"] not in ("MANAPPURAM", "INOXWIND")]
+    partial = [r for r in fixture_rows[OCT12] if r["symbol"] not in ("FREECO", "EDGECO")]
     oi_partial = build_combineoi(partial_dir, OCT12, partial)
     load_official_day(store, FIXTURES / "fo_secban_12102026.csv", oi_partial)
 
@@ -255,8 +256,8 @@ def test_a_scrip_with_no_prior_state_is_refused_only_inside_the_band(
     summary = record_forecast_day(store, oi, rules)
     refused = {sym for sym, _ in summary.refused}
 
-    # both are in the band on 12 Oct (86.47% and 85.54%), so both are refused
-    assert refused == {"MANAPPURAM", "INOXWIND"}, refused
+    # both are in the band on 12 Oct (90.00% and 95.00%), so both are refused
+    assert refused == {"FREECO", "EDGECO"}, refused
     # and the rest of the day still completed
     assert summary.write.written == len(fixture_rows[OCT12]) - 2
 

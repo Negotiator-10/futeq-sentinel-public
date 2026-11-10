@@ -343,7 +343,7 @@ Three entries all just above 95%, four releases all at or below 80%, and nothing
 points between - the hysteresis band, empty of transitions by construction.
 
 **SAIL on 15 Oct is the row that justifies the wording.** At the 14 Oct close its FutEq OI was
-206,047,699.58 against an MWPL of REDACTED: utilisation 95.0135%, which is **29,360 shares**
+95.0135% of its MWPL, which is **29,360 shares**
 past the line on a limit of 217 million, one part in seven thousand. NSE banned it. Para 5.2.6
 says "exceeds", so the config operator is `>`; I noted on 1 Nov that a scrip sitting exactly on
 95% is therefore not in ban, which read as pedantry about a single word. This row is 0.0135 of a

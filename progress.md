@@ -320,3 +320,17 @@ runner walk; build the runner on Tue 10 Nov; tag v0.1 on Wed 11 Nov.
 
 **Still untested on real data:** a scrip exactly on 95.00% or 80.00%,
 a missing prior state, and a new scrip near a line.
+
+## 10 Nov 2026 (Tue)
+
+- **NSE content out of the repository** (#010 addendum). The NSE fixtures
+  are replaced by a builder (`scripts/build_nse_fixtures.py`), a hash
+  manifest (`tests/fixtures/nse_built.sha256`) and a synthetic window that
+  CI runs instead. The real-data tests build from `data/` and skip without it.
+- **The old fixtures were near-copies, not copies.** The transitions rows
+  had six FutEq values that had been through a float and back: equal to
+  NSE's as numbers, different in the last digit as strings. The parser
+  sample ended its last line with a hand-typed LF where NSE writes CRLF.
+  Both parsed to the same rows. The builder now writes NSE's exact bytes,
+  and the manifest records those, so a fixture can no longer drift from
+  its source without a hash failing.

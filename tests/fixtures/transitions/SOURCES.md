@@ -1,9 +1,11 @@
 # Provenance for `tests/fixtures/transitions/`
 
-Built on 7 Nov 2026 by a script from the files in `data/`, which is gitignored.
-`CLAUDE.md` requires every downloaded file to carry a checksum; these are the checksums
-of the inputs these fixtures were derived from, so the derivation can be repeated and
-checked. The same hashes are in `docs/READING.md`.
+**The fixture files are not in this directory.** They are NSE content, so they are built from
+the files in `data/` (gitignored) by `scripts/build_nse_fixtures.py`, at test time by
+`tests/conftest.py`, and never committed (`DECISIONS.md` #010 addendum). This file keeps what can
+be published: which rows are selected, and the checksum of every input, so the derivation can be
+repeated and checked. The hash of every built file is in `tests/fixtures/nse_built.sha256`. The
+same input hashes are in `docs/READING.md`. First built on 7 Nov 2026.
 
 `combineoi_rows.csv` holds **selected rows**, not whole files: the five scrips that
 transition in this window, plus `MANAPPURAM` and `INOXWIND` (in the 80-95% band on every
@@ -11,8 +13,7 @@ day and never transitioning - the free-stays-free control) and `KARURVYSYA` (far
 every threshold). Both kinds of in-band row are present on all seven days; either half
 alone would let an engine pass that simply answered "banned" for everything in the band.
 
-The ban lists are copied byte-for-byte. `fo_secban_02112026.csv` also exists one level up,
-where the parser tests assert on it directly; the two copies are identical.
+The ban lists are copied byte for byte. The rows are copied as the strings NSE published.
 
 | file | role | source bytes | source sha256 |
 |---|---|---|---|
@@ -39,5 +40,5 @@ where the parser tests assert on it directly; the two copies are identical.
 | `combineoi_28102026.zip` | 8 of 219 rows selected | 21,857 | `82532e2221a42b5b95de53402f8fc4bd20065a7db3317342e0eb0cd42e5d2303` |
 | `combineoi_30102026.zip` | 8 of 218 rows selected | 22,204 | `076660e6f7452d28f497859483df13903863ec1bbfc4932b0a01737ca291211c` |
 
-Regenerate with the builder recorded in `DECISIONS.md`; the fixture is derived data
-and should never be edited by hand.
+Regenerate with `scripts/build_nse_fixtures.py`; the fixture is derived data and is never
+edited by hand.

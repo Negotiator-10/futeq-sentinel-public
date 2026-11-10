@@ -59,8 +59,7 @@ Three entries all just above the 95% line, five releases all at or below 80%, an
 fifteen points between — the hysteresis band, empty of transitions.
 
 **SAIL on 15 October is the row I would put in front of anyone.** At the previous close its
-futures-equivalent open interest was 206,047,699.58 against an MWPL of REDACTED: 95.0135%
-utilisation, **29,360 shares** past the line on a limit of 217 million, one part in seven
+futures-equivalent open interest was 95.0135% of its MWPL: **29,360 shares** past the line on a limit of 217 million, one part in seven
 thousand. NSE banned it. Paragraph 5.2.6 of SEBI 2025/79 says a ban applies when open interest
 *exceeds* 95%, so the comparison is strictly greater and a scrip sitting exactly on 95% is not in
 ban. I wrote that down on 1 November because of one word in a circular; two weeks of real data
@@ -113,7 +112,7 @@ Python 3.12.
 
 ```
 pip install -e ".[dev]"
-pytest                        # 351 tests
+pytest                        # 409 tests; 31 skip without NSE's files in data/
 python scripts/score_bans.py  # reproduces the full score from the files in data/
 ```
 
@@ -122,10 +121,16 @@ installed to import it, because `pyproject.toml` puts `src` on the path for `pyt
 script adds it itself.
 
 `score_bans.py` exits 0 and explains itself when `data/` is absent, since the raw files are
-gitignored. `tests/test_transitions.py` proves all eight transitions from committed fixtures,
-so they are checked on every push without needing the raw data. SAIL's walk out of the ban,
-2 to 6 November, has its own fixture directory, built by `scripts/build_sail_fixture.py`, with
-both in-band cases on the one stock: held at 80.51%, kept out at 82.79%.
+gitignored. NSE's files are never committed, not even as test fixtures (`DECISIONS.md` #010
+addendum). On every push, CI runs the ban rule end to end on synthetic files in NSE's layouts,
+`tests/test_synthetic_window.py`: made-up scrips placed exactly on each boundary and inside the
+band in both states. The real-data tests - all eight transitions, and SAIL's walk out of the ban
+from 2 to 6 November with both in-band cases on one stock (held at 80.51%, kept out at 82.79%) -
+build their fixtures from `data/` with `scripts/build_nse_fixtures.py`, check every file against
+`tests/fixtures/nse_built.sha256`, and skip when the files are absent.
+
+**Commits before 10 Nov 2026 won't run their tests.** The public repository's history was
+filtered to remove NSE's files, so those commits refer to fixtures that are no longer in it.
 
 ## How it is put together
 

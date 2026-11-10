@@ -1,8 +1,9 @@
-"""The project's headline result, enforced on every push.
+"""The project's headline result, on NSE's real files.
 
-Until now "1502 of 1502 scrip-days, seven transitions, zero errors" lived in a scratchpad
-script and two markdown files. Nothing in the repo proved it, which means a clone of this
-repository could pass all its tests while the one thing the project exists to do was broken.
+These tests need NSE's files in `data/`, which are downloaded by hand and never committed
+(`DECISIONS.md` #010 addendum). `tests/conftest.py` builds the fixtures from them with
+`scripts/build_nse_fixtures.py` and checks each against a recorded hash; without the files every
+test here skips. CI runs the same rule on synthetic files instead, in `test_synthetic_window.py`.
 
 These tests score `is_in_ban()` against NSE's own published ban lists on the five scrips that
 transitioned between 12 Oct and 2 Nov 2026, plus three controls. For each measurement day the
@@ -17,7 +18,7 @@ the answer. A chain that used it would be predicting the answer from itself - se
 `DECISIONS.md` #012 decision 5, and the 7 Nov entry in `LEARNING.md`.
 
 The fixture holds selected rows, not whole files; `tests/fixtures/transitions/SOURCES.md`
-records which file each row came from and its checksum. The full 1502-row figure needs the
+records which file each row comes from and its checksum. The full 1502-row figure needs the
 gitignored files in `data/` and is reproduced by `scripts/score_bans.py`.
 """
 
@@ -36,7 +37,7 @@ from sentinel.engine import is_in_ban, utilisation
 from sentinel.parsers import MwplRow, parse_ban_list
 from sentinel.rules import load_rules
 
-FIXTURES = Path(__file__).parent / "fixtures" / "transitions"
+SOURCES_DIR = Path(__file__).parent / "fixtures" / "transitions"   # provenance only
 
 #: The five that transition, the two in-band controls that never do, and one quiet scrip.
 TRANSITION_SCRIPS = {"KAYNES", "SAIL", "BANDHANBNK", "LICHSGFIN", "AMBUJACEM"}
@@ -50,8 +51,13 @@ def rules():
 
 
 @pytest.fixture(scope="module")
-def rows_by_day() -> dict[dt.date, dict[str, MwplRow]]:
-    return read_rows(FIXTURES / "combineoi_rows.csv")
+def fixtures(nse_built) -> Path:
+    return nse_built / "transitions"
+
+
+@pytest.fixture(scope="module")
+def rows_by_day(fixtures) -> dict[dt.date, dict[str, MwplRow]]:
+    return read_rows(fixtures / "combineoi_rows.csv")
 
 
 def read_rows(path: Path) -> dict[dt.date, dict[str, MwplRow]]:
@@ -80,8 +86,8 @@ def read_rows(path: Path) -> dict[dt.date, dict[str, MwplRow]]:
 
 
 @pytest.fixture(scope="module")
-def bans() -> dict[dt.date, frozenset[str]]:
-    return read_bans(FIXTURES)
+def bans(fixtures) -> dict[dt.date, frozenset[str]]:
+    return read_bans(fixtures)
 
 
 def read_bans(directory: Path) -> dict[dt.date, frozenset[str]]:
@@ -273,8 +279,7 @@ def test_the_quiet_control_is_never_banned(rows_by_day, bans, rules):
 def test_sail_entered_on_29360_shares_past_the_line(rows_by_day, rules):
     """The row that earns para 5.2.6's "exceeds" and the strict `>` in the config.
 
-    At the 14 Oct close SAIL's FutEq OI was 206,047,699.58 against an MWPL of REDACTED:
-    95.0135% utilisation, 29,360 shares past the 95% line on a limit of 217 million - one part
+    At the 14 Oct close SAIL's FutEq OI was 95.0135% of its MWPL: 29,360 shares past the 95% line on a limit of 217 million - one part
     in seven thousand. NSE banned it the next day. Had it closed 0.0135 of a percentage point
     lower, "exceeds" says no ban and `>=` says ban, and this project would have been wrong.
     """
@@ -320,23 +325,23 @@ def test_the_no_fresh_positions_flag_is_a_next_day_declaration(rows_by_day, bans
 # -- provenance ---------------------------------------------------------------------------
 
 
-def test_the_ban_list_fixtures_match_their_recorded_checksums():
+def test_the_ban_list_fixtures_match_their_recorded_checksums(fixtures):
     """A selected fixture without provenance is data with no origin.
 
     SOURCES.md records the sha256 of every input. The ban lists were copied byte-for-byte, so
     their recorded hash must still match - if one is edited by hand, this fails.
     """
-    doc = (FIXTURES / "SOURCES.md").read_text(encoding="utf-8")
+    doc = (SOURCES_DIR / "SOURCES.md").read_text(encoding="utf-8")
     recorded = dict(re.findall(r"\| \`(fo_secban_\d+\.csv)\` \|[^|]*\|[^|]*\| \`([0-9a-f]{64})\` \|", doc))
     assert len(recorded) == 15, f"expected 15 ban lists in SOURCES.md, found {len(recorded)}"
 
     for name, digest in recorded.items():
-        actual = hashlib.sha256((FIXTURES / name).read_bytes()).hexdigest()
+        actual = hashlib.sha256((fixtures / name).read_bytes()).hexdigest()
         assert actual == digest, f"{name} does not match the hash in SOURCES.md"
 
 
 def test_the_selected_rows_are_documented_as_selected():
-    doc = (FIXTURES / "SOURCES.md").read_text(encoding="utf-8")
+    doc = (SOURCES_DIR / "SOURCES.md").read_text(encoding="utf-8")
     assert "rows selected" in doc
     assert "combineoi_rows.csv" in doc
 
@@ -346,22 +351,23 @@ def test_the_selected_rows_are_documented_as_selected():
 # A second window, in its own fixture directory so the first window's counts stay what they
 # claim. One stock, five closes: held three times inside the band, released from just below the
 # exit, then kept out inside the band at a HIGHER utilisation than one of the days it was held.
-# Built by `scripts/build_sail_fixture.py`; provenance in `fixtures/sail_release/SOURCES.md`.
+# Built by `scripts/build_nse_fixtures.py`; provenance in `fixtures/sail_release/SOURCES.md`.
 #
 # The next day comes from the calendar, not from "the next file in the folder": the 6 Nov close
 # is answered by Sunday 8 Nov's list because the Muhurat session chains (#013 addendum).
 
-SAIL_FIXTURES = Path(__file__).parent / "fixtures" / "sail_release"
+SAIL_SOURCES = Path(__file__).parent / "fixtures" / "sail_release"   # provenance only
 
 
 @pytest.fixture(scope="module")
-def sail_rows() -> dict[dt.date, MwplRow]:
-    return {day: rows["SAIL"] for day, rows in read_rows(SAIL_FIXTURES / "combineoi_rows.csv").items()}
+def sail_rows(nse_built) -> dict[dt.date, MwplRow]:
+    rows = read_rows(nse_built / "sail_release" / "combineoi_rows.csv")
+    return {day: by_symbol["SAIL"] for day, by_symbol in rows.items()}
 
 
 @pytest.fixture(scope="module")
-def sail_bans() -> dict[dt.date, frozenset[str]]:
-    return read_bans(SAIL_FIXTURES)
+def sail_bans(nse_built) -> dict[dt.date, frozenset[str]]:
+    return read_bans(nse_built / "sail_release")
 
 
 @pytest.fixture(scope="module")
@@ -424,15 +430,15 @@ def test_sail_has_exactly_one_transition_a_release_effective_6_nov(sail_rows, sa
     assert seen == [(dt.date(2026, 11, 6), "release")]
 
 
-def test_the_sail_fixtures_match_their_sources_and_reading():
+def test_the_sail_fixtures_match_their_sources_and_reading(nse_built):
     """Ban lists byte-exact against SOURCES.md; every SOURCES.md hash equals READING.md's."""
-    doc = (SAIL_FIXTURES / "SOURCES.md").read_text(encoding="utf-8")
+    doc = (SAIL_SOURCES / "SOURCES.md").read_text(encoding="utf-8")
     recorded = dict(re.findall(r"\| `((?:fo_secban|combineoi)_\d+\.(?:csv|zip))` \|[^|]*\|[^|]*\| `([0-9a-f]{64})` \|", doc))
     assert len(recorded) == 11, f"expected 6 ban lists and 5 combineoi in SOURCES.md, found {len(recorded)}"
 
     for name, digest in recorded.items():
         if name.startswith("fo_secban"):
-            actual = hashlib.sha256((SAIL_FIXTURES / name).read_bytes()).hexdigest()
+            actual = hashlib.sha256((nse_built / "sail_release" / name).read_bytes()).hexdigest()
             assert actual == digest, f"{name} does not match the hash in SOURCES.md"
 
     reading = (Path(__file__).parents[1] / "docs" / "READING.md").read_text(encoding="utf-8")

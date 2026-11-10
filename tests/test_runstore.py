@@ -39,18 +39,18 @@ from sentinel.store import (
 WED4, THU5, TUE10, WED11 = (dt.date(2026, 11, 4), dt.date(2026, 11, 5), dt.date(2026, 11, 10),
                             dt.date(2026, 11, 11))
 SHA_A, SHA_B = "a" * 64, "b" * 64
-SAIL_ISIN = "INE114A01011"
+HELD_ISIN = "INE000000027"
 TESTCO_ISIN = "INE000000001"
 
-# SAIL's real 4 Nov row (tests/fixtures/sail_release): in ban, held at 80.51%.
-SAIL_4NOV = MwplRow(trade_date=WED4, isin=SAIL_ISIN, scrip_name="STEEL AUTHORITY OF INDIA",
-                    symbol="SAIL", mwpl=REDACTED, notional_oi=REDACTED,
-                    futeq_oi=REDACTED, no_fresh_positions=True, headroom_shares=None)
+# A synthetic held row, shaped like SAIL on 4 Nov: in ban, held in the band at 80.51%.
+HELD_4NOV = MwplRow(trade_date=WED4, isin=HELD_ISIN, scrip_name="HELD CO", symbol="HELDCO",
+                    mwpl=200_000_000, notional_oi=162_000_000, futeq_oi=161_020_000.618356,
+                    no_fresh_positions=True, headroom_shares=None)
 # A free scrip built so its headroom residual is exactly 0.75: 950,000 - 500,000.25 = 449,999.75.
 TESTCO_4NOV = MwplRow(trade_date=WED4, isin=TESTCO_ISIN, scrip_name="TEST CO", symbol="TESTCO",
                       mwpl=1_000_000, notional_oi=600_000, futeq_oi=500_000.25,
                       no_fresh_positions=False, headroom_shares=449_999)
-ROWS = (SAIL_4NOV, TESTCO_4NOV)
+ROWS = (HELD_4NOV, TESTCO_4NOV)
 
 
 @pytest.fixture(scope="module")
@@ -81,9 +81,9 @@ def start(store, lock, day=WED4, **overrides):
 def write_a_day(store, run, rules):
     """Everything a run on 4 Nov writes, in one transaction."""
     with store.day_transaction(WED4, run.run_id):
-        store.record_official(WED4, {SAIL_ISIN: ("SAIL", True), TESTCO_ISIN: ("TESTCO", False)},
+        store.record_official(WED4, {HELD_ISIN: ("HELDCO", True), TESTCO_ISIN: ("TESTCO", False)},
                               input_sha256=SHA_B)
-        store.record_forecast(THU5, {SAIL_ISIN: ("SAIL", True), TESTCO_ISIN: ("TESTCO", False)},
+        store.record_forecast(THU5, {HELD_ISIN: ("HELDCO", True), TESTCO_ISIN: ("TESTCO", False)},
                               input_sha256=SHA_A)
         store.record_measurements(ROWS, input_sha256=SHA_A)
         store.record_reconciliation(reconcile(ROWS, rules), input_sha256=SHA_A)
@@ -91,7 +91,7 @@ def write_a_day(store, run, rules):
         store.record_refusals([Refusal(WED4, RefusalStage.SCORE, "", "3 Nov forecast not stored")])
 
 
-ROW6 = ReductionCheck(trade_date=WED4, tm="TMA", ucc="C001", isin=SAIL_ISIN,
+ROW6 = ReductionCheck(trade_date=WED4, tm="TMA", ucc="C001", isin=HELD_ISIN,
                       yesterday_delta=Decimal("1000"), baseline=Decimal("980.50000001"),
                       today_delta=Decimal("0"), permitted=True, reason="closed out from 980.5")
 
@@ -250,8 +250,8 @@ def test_a_crash_inside_the_day_leaves_nothing_of_it(store, lock, rules):
     run = start(store, lock)
     with pytest.raises(RuntimeError, match="stage crashed"):
         with store.day_transaction(WED4, run.run_id):
-            store.record_official(WED4, {SAIL_ISIN: ("SAIL", True)}, input_sha256=SHA_B)
-            store.record_forecast(THU5, {SAIL_ISIN: ("SAIL", True)}, input_sha256=SHA_A)
+            store.record_official(WED4, {HELD_ISIN: ("HELDCO", True)}, input_sha256=SHA_B)
+            store.record_forecast(THU5, {HELD_ISIN: ("HELDCO", True)}, input_sha256=SHA_A)
             store.record_measurements(ROWS, input_sha256=SHA_A)
             store.record_reconciliation(reconcile(ROWS, rules), input_sha256=SHA_A)
             store.record_row6_checks([ROW6])
@@ -272,7 +272,7 @@ def test_a_committed_day_reads_back_exactly(store, lock, rules):
     run = start(store, lock)
     write_a_day(store, run, rules)
 
-    assert store.measurements(WED4) == (SAIL_4NOV, TESTCO_4NOV)   # FutEq OI to the last bit
+    assert store.measurements(WED4) == (HELD_4NOV, TESTCO_4NOV)   # FutEq OI to the last bit
     rec = store.reconciliation(WED4)
     assert (rec.rows_total, rec.residual_count, rec.barred_count, rec.barred_held) == (2, 1, 1, 1)
     assert rec.residual_min == rec.residual_max == pytest.approx(0.75)
@@ -280,8 +280,8 @@ def test_a_committed_day_reads_back_exactly(store, lock, rules):
     assert store.row6_checks(WED4) == (ROW6,)                    # Decimals come back exact
     assert store.row6_checks(WED4)[0].baseline == Decimal("980.50000001")
     assert store.refusals(WED4) == (Refusal(WED4, RefusalStage.SCORE, "", "3 Nov forecast not stored"),)
-    assert store.was_in_ban(SAIL_ISIN, WED4) is True
-    assert dict((i, f) for i, _, f, _ in store.scored_forecasts(THU5)) == {SAIL_ISIN: True,
+    assert store.was_in_ban(HELD_ISIN, WED4) is True
+    assert dict((i, f) for i, _, f, _ in store.scored_forecasts(THU5)) == {HELD_ISIN: True,
                                                                           TESTCO_ISIN: False}
 
 
@@ -298,9 +298,9 @@ def test_run_d_writes_only_ds_official_state_and_the_next_days_forecast(store, l
     run = start(store, lock)
     with store.day_transaction(WED4, run.run_id):
         with pytest.raises(StoreError, match="may write official for 2026-11-04 only"):
-            store.record_official(THU5, {SAIL_ISIN: ("SAIL", True)}, input_sha256=SHA_B)
+            store.record_official(THU5, {HELD_ISIN: ("HELDCO", True)}, input_sha256=SHA_B)
         with pytest.raises(StoreError, match="may write forecast for 2026-11-05 only"):
-            store.record_forecast(WED4, {SAIL_ISIN: ("SAIL", True)}, input_sha256=SHA_A)
+            store.record_forecast(WED4, {HELD_ISIN: ("HELDCO", True)}, input_sha256=SHA_A)
         with pytest.raises(StoreError, match="open day transaction is for 2026-11-04"):
             store.record_refusals([Refusal(THU5, RefusalStage.ROW6, "", "x")])
 
@@ -310,7 +310,7 @@ def test_the_forecast_crosses_the_muhurat_sunday(store, lock):
     fri, sun = dt.date(2026, 11, 6), dt.date(2026, 11, 8)
     run = start(store, lock, day=fri)
     with store.day_transaction(fri, run.run_id):
-        store.record_forecast(sun, {SAIL_ISIN: ("SAIL", False)}, input_sha256=SHA_A)
+        store.record_forecast(sun, {HELD_ISIN: ("HELDCO", False)}, input_sha256=SHA_A)
     assert store.has_day(sun)
 
 
@@ -352,7 +352,7 @@ def test_missing_ban_list_refused_and_not_run_are_three_different_records(store,
     # 4 Nov: ran, but its ban list was missing. Only the forecast column is filled in.
     run = start(store, lock)
     with store.day_transaction(WED4, run.run_id):
-        store.record_forecast(THU5, {SAIL_ISIN: ("SAIL", True)}, input_sha256=SHA_A)
+        store.record_forecast(THU5, {HELD_ISIN: ("HELDCO", True)}, input_sha256=SHA_A)
         store.record_refusals([Refusal(WED4, RefusalStage.OFFICIAL_STATE, "",
                                        "fo_secban_04112026.csv missing")])
     store.finish_run(run.run_id, RunOutcome.COMPLETED, lock=lock)
@@ -388,7 +388,7 @@ def test_one_refusal_per_stage_and_subject(store, lock):
     run = start(store, lock)
     with store.day_transaction(WED4, run.run_id):
         store.record_refusals([
-            Refusal(WED4, RefusalStage.FORECAST, SAIL_ISIN, "in band and no seed"),
+            Refusal(WED4, RefusalStage.FORECAST, HELD_ISIN, "in band and no seed"),
             Refusal(WED4, RefusalStage.ROW6, "", "no prop book for 2026-11-04"),
         ])
         with pytest.raises(StoreError, match="twice in one batch"):
@@ -418,10 +418,10 @@ def test_a_changed_result_refuses_and_names_what_changed(store, lock, rules):
     write_a_day(store, first, rules)
     store.finish_run(first.run_id, RunOutcome.COMPLETED, lock=lock)
 
-    revised = MwplRow(**{**SAIL_4NOV.__dict__, "futeq_oi": 174595486.0})
+    revised = MwplRow(**{**HELD_4NOV.__dict__, "futeq_oi": 161_020_001.0})
     second = start(store, lock)
     with pytest.raises(StoreError, match="decision 11") as exc:
         with store.day_transaction(WED4, second.run_id):
             store.record_measurements((revised, TESTCO_4NOV), input_sha256=SHA_A)
-    assert "futeq_oi" in str(exc.value) and SAIL_ISIN in str(exc.value)
-    assert store.measurements(WED4)[0] == SAIL_4NOV       # the stored day is untouched
+    assert "futeq_oi" in str(exc.value) and HELD_ISIN in str(exc.value)
+    assert store.measurements(WED4)[0] == HELD_4NOV       # the stored day is untouched

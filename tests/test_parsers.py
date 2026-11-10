@@ -6,6 +6,10 @@ the function's docstring, so a test failing here means a decision changed.
 
 Written by Claude from behaviour Chintamani's code already produced and we had both seen
 pass. The decisions being tested are his.
+
+The fixture files are synthetic, in NSE's exact layout: NSE's content stays out of the
+repository (`DECISIONS.md` #010 addendum). The same parsers run on NSE's real files in
+`tests/test_nse_local.py`, which reads them from `data/` and skips without it.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from sentinel.parsers import (
     parse_mwpl_file,
 )
 
-REAL = "tests/fixtures/fo_secban_02112026.csv"
+SAMPLE_BANS = "tests/fixtures/synthetic/fo_secban_02112026.csv"
 EMPTY_DAY = "tests/fixtures/fo_secban_empty.csv"
 
 HEADING = "Securities in Ban For Trade Date 02-NOV-2026:"
@@ -35,14 +39,14 @@ def write(tmp_path, *lines: str, trailing_newline: bool = True):
 
 
 # ---------------------------------------------------------------------------
-# The real files
+# Whole files
 # ---------------------------------------------------------------------------
 
 
-def test_the_real_file():
-    result = parse_ban_list(REAL)
+def test_a_whole_file():
+    result = parse_ban_list(SAMPLE_BANS)
     assert result.trade_date == dt.date(2026, 11, 2)
-    assert result.symbols == frozenset({"KAYNES", "SAIL"})
+    assert result.symbols == frozenset({"LATCHCO", "HELDCO"})
 
 
 def test_a_day_with_no_bans_is_not_an_error():
@@ -54,7 +58,7 @@ def test_a_day_with_no_bans_is_not_an_error():
 
 def test_the_result_is_immutable():
     """Nothing downstream may add a scrip to the ban list."""
-    result = parse_ban_list(REAL)
+    result = parse_ban_list(SAMPLE_BANS)
     with pytest.raises(AttributeError):
         result.trade_date = dt.date(2026, 1, 1)  # type: ignore[misc]
     assert isinstance(result, BanList)
@@ -181,7 +185,7 @@ def test_a_truncated_file_is_indistinguishable_from_a_no_ban_day(tmp_path):
     """
     truncated = write(tmp_path, HEADING)
     assert parse_ban_list(truncated).symbols == frozenset()
-    # Identical to the real no-ban day, which is the problem:
+    # Identical to a no-ban day, which is the problem:
     assert parse_ban_list(EMPTY_DAY).symbols == frozenset()
 
 
@@ -189,19 +193,19 @@ def test_a_truncated_file_is_indistinguishable_from_a_no_ban_day(tmp_path):
 # parse_mwpl_file() and as_dataframe()
 # ===========================================================================
 
-SAMPLE = "tests/fixtures/combineoi_sample.csv"
+SAMPLE = "tests/fixtures/synthetic/combineoi_sample.csv"
 
 MWPL_HEADER = (
     "Date, ISIN, Scrip Name, NSE Symbol, MWPL, Open Interest, "
     "Future Equivalent Open Interest, Limit for Next Day"
 )
 BARRED_ROW = (
-    "30-OCT-2026,INE918Z01012,KAYNES TECHNOLOGY IND LTD,KAYNES,"
-    "REDACTED,REDACTED,REDACTED,No Fresh Positions"
+    "30-OCT-2026,INE000L01014,LATCH COMPANY LTD,LATCHCO,"
+    "5000000,6100000,4608500.5,No Fresh Positions"
 )
 NORMAL_ROW = (
-    "30-OCT-2026,INE466L01038,360 ONE WAM LIMITED,360ONE,"
-    "REDACTED,REDACTED,REDACTED,REDACTED"
+    "30-OCT-2026,INE000D01010,HEADROOM COMPANY LTD,HEADCO,"
+    "60000000,7500000,5000000.7805,51999999"
 )
 
 
@@ -214,13 +218,13 @@ def write_mwpl(tmp_path, *rows: str, header: str = MWPL_HEADER):
 def test_the_sample_file():
     rows = parse_mwpl_file(SAMPLE)
     assert len(rows) == 3
-    assert {r.symbol for r in rows} == {"KAYNES", "SAIL", "360ONE"}
+    assert {r.symbol for r in rows} == {"LATCHCO", "HELDCO", "HEADCO"}
     assert all(r.trade_date == dt.date(2026, 10, 30) for r in rows)
 
 
 def test_a_barred_row_has_no_headroom():
-    """The decision-1 invariant, on real published data."""
-    kaynes = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "KAYNES")
+    """The decision-1 invariant: a barred row's headroom is None, not a number."""
+    kaynes = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "LATCHCO")
     assert kaynes.no_fresh_positions is True
     assert kaynes.headroom_shares is None
     # And the formula would still have produced a POSITIVE number for it, which is why the
@@ -229,9 +233,9 @@ def test_a_barred_row_has_no_headroom():
 
 
 def test_a_normal_row_carries_nses_own_headroom():
-    row = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "360ONE")
+    row = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "HEADCO")
     assert row.no_fresh_positions is False
-    assert row.headroom_shares == REDACTED
+    assert row.headroom_shares == 51_999_999
     # NSE truncates to whole shares, so its figure is just under the exact formula.
     exact = 0.95 * row.mwpl - row.futeq_oi
     assert 0 <= exact - row.headroom_shares < 1
@@ -239,7 +243,7 @@ def test_a_normal_row_carries_nses_own_headroom():
 
 def test_futeq_oi_is_fractional_and_mwpl_is_not():
     """FutEq OI is a sum of delta-weighted positions, so it cannot be an integer type."""
-    row = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "KAYNES")
+    row = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "LATCHCO")
     assert isinstance(row.mwpl, int)
     assert isinstance(row.notional_oi, int)
     assert isinstance(row.futeq_oi, float)
@@ -288,7 +292,7 @@ def test_a_repeated_isin_is_refused(tmp_path):
 
 def test_an_unreadable_limit_value_is_refused(tmp_path):
     """Neither a whole number of shares nor the sentence NSE uses."""
-    path = write_mwpl(tmp_path, NORMAL_ROW.replace("REDACTED", "Under Review"))
+    path = write_mwpl(tmp_path, NORMAL_ROW.replace("51999999", "Under Review"))
     with pytest.raises(ValueError, match="neither a whole number"):
         parse_mwpl_file(path)
 
@@ -300,7 +304,7 @@ def test_an_index_row_is_refused(tmp_path):
     limits - so they are absent from this file. A row with `ISIN = NA` means something
     changed, and a store that accepts rows it cannot key will return the wrong one.
     """
-    path = write_mwpl(tmp_path, "30-10-2026,NA,NA,BANKNIFTY,REDACTED,REDACTED,5977425.37,1")
+    path = write_mwpl(tmp_path, "30-10-2026,NA,NA,BANKNIFTY,30000000,30000000,6000000.25,1")
     with pytest.raises(ValueError, match="no ISIN"):
         parse_mwpl_file(path)
 
@@ -349,7 +353,7 @@ def test_as_dataframe_turns_none_into_nan_and_that_is_the_risk():
 
     # pandas quietly aggregates over 1 row, not 3:
     assert df["headroom_shares"].count() == 1
-    assert df["headroom_shares"].sum() == REDACTED
+    assert df["headroom_shares"].sum() == 51_999_999
 
     # Pure Python refuses the same thing, which is why None was chosen:
     with pytest.raises(TypeError):
