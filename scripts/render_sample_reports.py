@@ -5,7 +5,8 @@ of the repository (DECISIONS.md #010 addendum). The window's scrips, ISINs and f
 made up (tests/fixtures/synthetic/window/); only the dates and the trading calendar are real.
 
 Two days:
-  2026-10-13  an ordinary day: a forecast, a held scrip, a free scrip at exactly 95%
+  2026-10-13  an ordinary day: a forecast for the 14th, a banned scrip held in the band,
+              and free scrips with their headroom set beside NSE's
   2026-10-14  a day whose ban list is missing: the stages that need it refuse, the rest run
 
 Each run goes into a temporary store, built the same way tests/test_runner.py builds its data.
