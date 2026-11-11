@@ -36,6 +36,7 @@ import datetime as _dt
 import operator as _operator
 import warnings
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
@@ -119,7 +120,13 @@ class Threshold:
                 f"{self.path}: no operator declared, so there is no comparison to make. "
                 f"Use .value and write the rule explicitly."
             )
-        return bool(_OPERATORS[self.operator](observed, self.value))
+        value = self.value
+        if isinstance(observed, Decimal) and isinstance(value, float):
+            # Compare a Decimal against the threshold as written, not as a binary float. The
+            # float 0.95 is 0.94999999999999995559, so Decimal("0.95") > 0.95 is True: without
+            # this, a scrip exactly on 95% would be banned - entry is "exceeds", strictly.
+            value = Decimal(str(value))
+        return bool(_OPERATORS[self.operator](observed, value))
 
 
 class Rules:

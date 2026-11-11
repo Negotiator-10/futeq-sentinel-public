@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import warnings
+from decimal import Decimal
 
 import pandas as pd
 import pytest
@@ -62,7 +63,7 @@ def make_row(
         symbol=symbol,
         mwpl=mwpl,
         notional_oi=notional_oi,
-        futeq_oi=futeq_oi,
+        futeq_oi=Decimal(str(futeq_oi)),     # as a parser would: from the written figure
         no_fresh_positions=no_fresh_positions,
         headroom_shares=headroom_shares,
     )
@@ -80,14 +81,14 @@ def test_utilisation_is_a_fraction_not_a_percentage():
 def test_utilisation_of_a_held_row():
     # Shaped like SAIL on 30 Oct (84.93%), the row that proved ban status is a state.
     u = utilisation(169_860_000.123, 200_000_000)
-    assert round(u, 4) == 0.8493
+    assert float(round(u, 4)) == 0.8493
 
 
 def test_utilisation_of_a_free_row_above_the_held_one():
     # Shaped like BANDHANBNK on 30 Oct (85.98%): higher than the held row, and NOT barred. The
     # pair is the evidence for the three-argument is_in_ban() in #011.
     u = utilisation(128_970_000.5, 150_000_000)
-    assert round(u, 4) == 0.8598
+    assert float(round(u, 4)) == 0.8598
     assert u > utilisation(169_860_000.123, 200_000_000)
 
 
@@ -95,7 +96,7 @@ def test_headroom_is_the_published_formula(rules):
     # Shaped like 360ONE on 30 Oct: NSE publishes the truncated figure, 51,999,999 here; the
     # exact one is 51,999,999.2195.
     row = make_row("HEADCO", mwpl=60_000_000, futeq_oi=5_000_000.7805, headroom_shares=51_999_999)
-    assert round(headroom_shares(row, rules), 4) == 51_999_999.2195
+    assert float(round(headroom_shares(row, rules), 4)) == 51_999_999.2195
 
 
 def test_headroom_is_not_truncated(rules):
@@ -111,7 +112,7 @@ def test_headroom_multiplies_rather_than_dividing(rules):
     # floating-point difference out of the residual. This asserts the shape, not just the value.
     row = make_row(mwpl=60_000_000, futeq_oi=5_000_000.7805)
     entry = rules.value("single_stock.ban.entry_utilisation")
-    assert headroom_shares(row, rules) == entry * row.mwpl - row.futeq_oi
+    assert headroom_shares(row, rules) == Decimal(str(entry)) * row.mwpl - row.futeq_oi
 
 
 def test_headroom_reads_the_threshold_from_the_config_not_a_literal(rules):
@@ -132,6 +133,27 @@ def test_headroom_reads_the_threshold_from_the_config_not_a_literal(rules):
         rules.path,
     )
     assert headroom_shares(row, patched) == 900_000.0
+
+
+def test_a_whole_number_headroom_reconciles_with_a_residual_of_exactly_zero(rules):
+    """The year's replay found this: on one real day the exact headroom was a whole number and
+    NSE published exactly it, but float arithmetic put ours 4e-9 below, which fails [0, 1).
+    These synthetic numbers do the same: 0.95 x 10,000,004 - 1,000,000.8 is exactly 8,500,003,
+    and as floats it is 8,500,002.999999998. In Decimal the residual is 0, and the row passes."""
+    row = make_row("WHOLECO", mwpl=10_000_004, futeq_oi=1_000_000.8, headroom_shares=8_500_003)
+    assert headroom_shares(row, rules) == 8_500_003
+    rec = reconcile((row,), rules)
+    assert rec.ok, rec.failures
+    assert rec.residuals[0].residual == 0
+
+
+def test_a_decimal_exactly_on_a_line_compares_against_the_line_as_written(rules):
+    """Decimal("0.95") > 0.95 is True in Python, because the float 0.95 is 0.9499999999999999556.
+    So the threshold must be compared as Decimal too, or a scrip exactly on 95% is banned."""
+    assert rules.compare("single_stock.ban.entry_utilisation", Decimal("0.95")) is False
+    assert rules.compare("single_stock.ban.entry_utilisation", Decimal("0.95000001")) is True
+    assert rules.compare("single_stock.ban.exit_utilisation", Decimal("0.8")) is True
+    assert rules.compare("single_stock.ban.exit_utilisation", Decimal("0.80000001")) is False
 
 
 def test_headroom_is_exactly_zero_at_the_entry_boundary(rules):
@@ -433,8 +455,8 @@ def test_two_scrips_same_utilisation_opposite_state(rules):
     sail_oi, sail_mwpl = 169_860_000.123, 200_000_000
     bandhan_oi, bandhan_mwpl = 128_970_000.5, 150_000_000
 
-    assert round(utilisation(sail_oi, sail_mwpl), 4) == 0.8493
-    assert round(utilisation(bandhan_oi, bandhan_mwpl), 4) == 0.8598
+    assert float(round(utilisation(sail_oi, sail_mwpl), 4)) == 0.8493
+    assert float(round(utilisation(bandhan_oi, bandhan_mwpl), 4)) == 0.8598
     assert utilisation(bandhan_oi, bandhan_mwpl) > utilisation(sail_oi, sail_mwpl)
 
     assert is_in_ban(sail_oi, sail_mwpl, was_in_ban_yesterday=True, rules=rules) is True

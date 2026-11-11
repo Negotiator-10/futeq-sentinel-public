@@ -284,7 +284,7 @@ CREATE TABLE IF NOT EXISTS measurement (
     scrip_name         TEXT    NOT NULL,
     mwpl               INTEGER NOT NULL CHECK (mwpl > 0),
     notional_oi        INTEGER NOT NULL CHECK (notional_oi >= 0),
-    futeq_oi           REAL    NOT NULL CHECK (futeq_oi >= 0),
+    futeq_oi           TEXT    NOT NULL CHECK (CAST(futeq_oi AS REAL) >= 0),  -- exact, as published
     no_fresh_positions INTEGER NOT NULL CHECK (no_fresh_positions IN (0, 1)),
     headroom_shares    INTEGER,
     input_sha256       TEXT    NOT NULL CHECK (length(input_sha256) = 64),
@@ -352,8 +352,24 @@ class BanStateStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        self._refuse_an_old_format()
         #: The open day transaction, as (trade_date, run_id), or None.
         self._txn: tuple[dt.date, str] | None = None
+
+    def _refuse_an_old_format(self) -> None:
+        """A store created before 11 Nov 2026 keeps `measurement.futeq_oi` as REAL, because the
+        schema is CREATE TABLE IF NOT EXISTS. SQLite's REAL affinity would then turn the exact
+        text written now back into a float, silently - the bug the Decimal change fixed. So such a
+        store is refused, and rebuilt by re-running its days, rather than opened."""
+        declared = {r["name"]: r["type"].upper()
+                    for r in self._conn.execute("PRAGMA table_info(measurement)")}
+        if declared.get("futeq_oi") != "TEXT":
+            self._conn.close()
+            raise StoreError(
+                f"{self.path}: measurement.futeq_oi is {declared.get('futeq_oi')!r}, not TEXT. "
+                f"This store predates exact FutEq OI (11 Nov 2026), and SQLite would round every "
+                f"new figure back to a float. Move it aside and re-run its days to rebuild it."
+            )
 
     # -- transactions -----------------------------------------------------------------------
 
@@ -741,7 +757,7 @@ class BanStateStore:
             values.append({
                 "isin": r.isin, "trade_date": day.isoformat(), "symbol": r.symbol,
                 "scrip_name": r.scrip_name, "mwpl": r.mwpl, "notional_oi": r.notional_oi,
-                "futeq_oi": float(r.futeq_oi), "no_fresh_positions": int(r.no_fresh_positions),
+                "futeq_oi": str(r.futeq_oi), "no_fresh_positions": int(r.no_fresh_positions),
                 "headroom_shares": r.headroom_shares, "input_sha256": input_sha256,
             })
         return self._insert_results("measurement", ("isin", "trade_date"), values, day, run_id)
@@ -842,7 +858,7 @@ class BanStateStore:
         ).fetchall()
         return tuple(MwplRow(
             trade_date=day, isin=r["isin"], scrip_name=r["scrip_name"], symbol=r["symbol"],
-            mwpl=r["mwpl"], notional_oi=r["notional_oi"], futeq_oi=r["futeq_oi"],
+            mwpl=r["mwpl"], notional_oi=r["notional_oi"], futeq_oi=Decimal(r["futeq_oi"]),
             no_fresh_positions=bool(r["no_fresh_positions"]), headroom_shares=r["headroom_shares"],
         ) for r in rows)
 

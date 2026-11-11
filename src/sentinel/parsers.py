@@ -16,6 +16,7 @@ import datetime as dt
 import re
 import zipfile
 from dataclasses import asdict, dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Sequence
 
@@ -63,7 +64,9 @@ class MwplRow:
     symbol: str
     mwpl: int
     notional_oi: int
-    futeq_oi: float
+    #: Exactly as published, as a Decimal. A float loses it: on 7 Apr 2026 one scrip's exact
+    #: headroom was a whole number, and the float came out 4e-9 below it, failing [0, 1).
+    futeq_oi: Decimal
 
     #: True when NSE printed `No Fresh Positions` instead of a headroom figure.
     no_fresh_positions: bool
@@ -111,6 +114,12 @@ class MwplRow:
             raise ValueError(
                 f"{self.symbol} ({self.isin}) on {self.trade_date}: MWPL is {self.mwpl}. "
                 f"A scrip in F&O has a positive market-wide position limit."
+            )
+        if not isinstance(self.futeq_oi, Decimal):
+            raise TypeError(
+                f"{self.symbol} ({self.isin}) on {self.trade_date}: FutEq OI is a "
+                f"{type(self.futeq_oi).__name__}, not a Decimal. Build it from the published "
+                f"string - Decimal('1000000.8') - because a float has already lost the exact figure."
             )
         if self.futeq_oi < 0:
             raise ValueError(
@@ -283,12 +292,16 @@ def parse_mwpl_file(path: str | Path) -> tuple[MwplRow, ...]:
                     f"member is malformed and cannot be used as a fallback."
                 )
             with archive.open(members[0]) as handle:
-                frame = pd.read_csv(handle, skipinitialspace=True, keep_default_na=False)
+                frame = pd.read_csv(handle, skipinitialspace=True, keep_default_na=False,
+                                    dtype=str)
     else:
-        frame = pd.read_csv(path, skipinitialspace=True, keep_default_na=False)
+        frame = pd.read_csv(path, skipinitialspace=True, keep_default_na=False, dtype=str)
 
     # `skipinitialspace` handles the values; the header needs stripping separately, because
     # NSE writes 'Date, ISIN, Scrip Name, ...' with a space after each comma.
+    #
+    # `dtype=str` is load-bearing too: without it pandas reads FutEq OI as a float64 before
+    # this function sees it, and the exact published figure is gone (see MwplRow.futeq_oi).
     #
     # `keep_default_na=False` is load-bearing, not tidiness. pandas' default missing-value
     # list includes the literal string "NA", which is exactly what NSE writes in the ISIN
@@ -302,6 +315,14 @@ def parse_mwpl_file(path: str | Path) -> tuple[MwplRow, ...]:
             f"{path}: missing column(s) {missing}. Got {list(frame.columns)}. A renamed column "
             f"means the format changed - see the 7 Dec 2026 cutover in docs/READING.md."
         )
+
+    def _exact(text: object, where: Path | str, line: int) -> Decimal:
+        try:
+            return Decimal(str(text).strip())
+        except InvalidOperation as exc:
+            raise ValueError(
+                f"{where} line {line}: FutEq OI is {text!r}, which is not a number"
+            ) from exc
 
     rows: list[MwplRow] = []
     for position, record in enumerate(frame.to_dict("records"), start=2):
@@ -327,7 +348,7 @@ def parse_mwpl_file(path: str | Path) -> tuple[MwplRow, ...]:
                 symbol=str(record["NSE Symbol"]).strip(),
                 mwpl=int(record["MWPL"]),
                 notional_oi=int(record["Open Interest"]),
-                futeq_oi=float(record["Future Equivalent Open Interest"]),
+                futeq_oi=_exact(record["Future Equivalent Open Interest"], path, position),
                 no_fresh_positions=barred,
                 headroom_shares=headroom,
             )

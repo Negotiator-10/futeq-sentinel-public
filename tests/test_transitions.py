@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+from decimal import Decimal
 import hashlib
 import re
 from pathlib import Path
@@ -77,7 +78,7 @@ def read_rows(path: Path) -> dict[dt.date, dict[str, MwplRow]]:
                 symbol=rec["symbol"],
                 mwpl=int(rec["mwpl"]),
                 notional_oi=int(rec["notional_oi"]),
-                futeq_oi=float(rec["futeq_oi"]),
+                futeq_oi=Decimal(rec["futeq_oi"]),
                 no_fresh_positions=rec["no_fresh_positions"] == "True",
                 headroom_shares=None if rec["headroom_shares"] == "" else int(rec["headroom_shares"]),
             )
@@ -179,7 +180,7 @@ def test_the_utilisation_behind_each_transition(rows_by_day, day, symbol, expect
     moved these, the verdict could stay right for the wrong reason.
     """
     r = rows_by_day[day][symbol]
-    assert round(utilisation(r.futeq_oi, r.mwpl), 4) == expected_utilisation
+    assert float(round(utilisation(r.futeq_oi, r.mwpl), 4)) == expected_utilisation
 
 
 # -- both kinds of in-band row, on every day ----------------------------------------------
@@ -239,8 +240,8 @@ def test_two_scrips_0_41_points_apart_with_opposite_states(rows_by_day, bans, ru
 
     u_sail = utilisation(sail.futeq_oi, sail.mwpl)
     u_ambuja = utilisation(ambuja.futeq_oi, ambuja.mwpl)
-    assert round(u_sail, 4) == 0.9250
-    assert round(u_ambuja, 4) == 0.9291
+    assert float(round(u_sail, 4)) == 0.9250
+    assert float(round(u_ambuja, 4)) == 0.9291
     assert u_ambuja - u_sail < 0.005
 
     got = forecast(day, rows_by_day, bans, rules)
@@ -252,7 +253,7 @@ def test_a_scrip_two_thirds_of_a_point_below_the_entry_line_stays_free(rows_by_d
     """13 Oct: SAIL at 94.35%, not banned. Any "high utilisation means banned" shortcut dies here."""
     day = dt.date(2026, 10, 13)
     r = rows_by_day[day]["SAIL"]
-    assert round(utilisation(r.futeq_oi, r.mwpl), 4) == 0.9435
+    assert float(round(utilisation(r.futeq_oi, r.mwpl), 4)) == 0.9435
     assert "SAIL" not in forecast(day, rows_by_day, bans, rules)
 
 
@@ -260,7 +261,7 @@ def test_a_scrip_just_above_the_exit_line_is_held(rows_by_day, bans, rules):
     """26 Oct: KAYNES at 80.42%, four-tenths of a point above the 80% release, stays banned."""
     day = dt.date(2026, 10, 26)
     r = rows_by_day[day]["KAYNES"]
-    assert round(utilisation(r.futeq_oi, r.mwpl), 4) == 0.8042
+    assert float(round(utilisation(r.futeq_oi, r.mwpl), 4)) == 0.8042
     assert "KAYNES" in forecast(day, rows_by_day, bans, rules)
 
 
@@ -286,13 +287,13 @@ def test_sail_entered_on_29360_shares_past_the_line(rows_by_day, rules):
     r = rows_by_day[dt.date(2026, 10, 14)]["SAIL"]
     entry = rules.value("single_stock.ban.entry_utilisation")
 
-    past = r.futeq_oi - entry * r.mwpl
+    past = r.futeq_oi - Decimal(str(entry)) * r.mwpl
     assert 29_000 < past < 30_000
     assert round(past) == 29_360
 
     u = utilisation(r.futeq_oi, r.mwpl)
     assert u > entry
-    assert u - entry < 0.0002
+    assert u - Decimal(str(entry)) < Decimal("0.0002")
     assert is_in_ban(r.futeq_oi, r.mwpl, was_in_ban_yesterday=False, rules=rules) is True
 
 
@@ -396,7 +397,7 @@ SAIL_WALK = [
 def test_sail_each_close_is_forecast_as_nse_published(
         sail_rows, sail_bans, rules, calendar, day, util, was_banned, next_day, next_banned):
     r = sail_rows[day]
-    assert round(utilisation(r.futeq_oi, r.mwpl), 4) == util
+    assert float(round(utilisation(r.futeq_oi, r.mwpl), 4)) == util
     assert ("SAIL" in sail_bans[day]) is was_banned
     assert calendar.next_trading_day(day) == next_day
     assert ("SAIL" in sail_bans[next_day]) is next_banned, "the fixture's answer has changed"

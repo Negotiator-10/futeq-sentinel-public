@@ -132,19 +132,19 @@ def utilisation(futeq_oi: float, mwpl: int) -> float:
     return futeq_oi / mwpl
 
 
-def headroom_shares(row: MwplRow, rules: Rules) -> float:
-    """Shares of fresh position available before the ban threshold, exactly.
+def headroom_shares(row: MwplRow, rules: Rules) -> Decimal:
+    """Return the exact number of shares of fresh position available before
+    the scrip crosses the ban entry threshold.
 
-    The 0.95 is read from the config rather than typed here, so it arrives carrying its
-    operator, its circular and the date I read it, and moving the threshold is one YAML edit
-    rather than a grep. Written as ``entry * mwpl - futeq_oi`` to match the arithmetic shape
-    of NSE's own published column, which keeps a floating-point difference out of the
-    reconciliation residual.
+    Computed in Decimal: NSE's figures are decimal strings, and float
+    arithmetic can turn a residual of exactly 0 into -4e-9, which fails the
+    [0, 1) reconciliation on a correct row (found by the year replay).
 
-    Not truncated. NSE truncates its figure down to whole shares; truncating here too would
-    drive the residual to zero and destroy the one thing `reconcile()` exists to measure.
+    The threshold comes from config/rules.yaml, never a literal. The result
+    is deliberately NOT truncated: NSE truncates, and the gap between the
+    two is what reconcile() measures.
     """
-    entry = rules.value("single_stock.ban.entry_utilisation")
+    entry = Decimal(str(rules.value("single_stock.ban.entry_utilisation")))
     return entry * row.mwpl - row.futeq_oi
 
 

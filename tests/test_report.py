@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 import shutil
+from decimal import Decimal
 
 import pytest
 
@@ -298,9 +299,11 @@ def make_row(symbol: str, *, mwpl: int, futeq_oi: float, barred: bool) -> MwplRo
     """A valid synthetic row: an INE000 ISIN (the CI scan's synthetic prefix), and NSE's
     headroom as NSE publishes it - truncated - for a free row, None for a barred one."""
     isin = f"INE000{sum(map(ord, symbol)) % 100000:05d}1"
-    headroom = None if barred else math.floor(RULES.value(report.ENTRY_KEY) * mwpl - futeq_oi)
+    exact = Decimal(str(futeq_oi))
+    entry = Decimal(str(RULES.value(report.ENTRY_KEY)))
+    headroom = None if barred else math.floor(entry * mwpl - exact)
     return MwplRow(trade_date=ROW_DAY, isin=isin, scrip_name=f"{symbol} LTD", symbol=symbol,
-                   mwpl=mwpl, notional_oi=math.ceil(futeq_oi), futeq_oi=float(futeq_oi),
+                   mwpl=mwpl, notional_oi=math.ceil(exact), futeq_oi=exact,
                    no_fresh_positions=barred, headroom_shares=headroom)
 
 
@@ -390,4 +393,4 @@ def test_free_headroom_is_exact_not_truncated():
     (entry,) = watchlist([row], {row.isin: False}, RULES)
     gap = entry.headroom - entry.nse_headroom
     assert 0 < gap < 1                       # strictly above 0: the fraction survived
-    assert gap == pytest.approx(0.75)
+    assert gap == Decimal("0.75")          # exact now, not approximately

@@ -30,6 +30,7 @@ import hashlib
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 
@@ -172,8 +173,8 @@ def watchlist(
 
     Thresholds and their directions come from rules.yaml, never literals.
     """
-    entry = rules.value(ENTRY_KEY)
-    exit_ = rules.value(EXIT_KEY)
+    entry = Decimal(str(rules.value(ENTRY_KEY)))
+    exit_ = Decimal(str(rules.value(EXIT_KEY)))
     entries = []
 
     for r in sorted(rows, key=lambda r: r.symbol):

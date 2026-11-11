@@ -44,11 +44,11 @@ TESTCO_ISIN = "INE000000001"
 
 # A synthetic held row, shaped like SAIL on 4 Nov: in ban, held in the band at 80.51%.
 HELD_4NOV = MwplRow(trade_date=WED4, isin=HELD_ISIN, scrip_name="HELD CO", symbol="HELDCO",
-                    mwpl=200_000_000, notional_oi=162_000_000, futeq_oi=161_020_000.618356,
+                    mwpl=200_000_000, notional_oi=162_000_000, futeq_oi=Decimal("161020000.618356"),
                     no_fresh_positions=True, headroom_shares=None)
 # A free scrip built so its headroom residual is exactly 0.75: 950,000 - 500,000.25 = 449,999.75.
 TESTCO_4NOV = MwplRow(trade_date=WED4, isin=TESTCO_ISIN, scrip_name="TEST CO", symbol="TESTCO",
-                      mwpl=1_000_000, notional_oi=600_000, futeq_oi=500_000.25,
+                      mwpl=1_000_000, notional_oi=600_000, futeq_oi=Decimal("500000.25"),
                       no_fresh_positions=False, headroom_shares=449_999)
 ROWS = (HELD_4NOV, TESTCO_4NOV)
 
@@ -237,6 +237,30 @@ def test_a_rules_status_that_is_not_two_lists_of_keys_is_refused(store, lock, st
     with pytest.raises(StoreError, match=match):
         start(store, lock, rules_status=status)
     assert store.runs_for(WED4) == ()                   # refused before anything was written
+
+
+def test_a_store_from_before_exact_futeq_oi_is_refused(tmp_path):
+    """An old store keeps futeq_oi as REAL (CREATE TABLE IF NOT EXISTS leaves it), and SQLite
+    would silently turn exact text back into a float there. Refused rather than opened."""
+    old = tmp_path / "old.sqlite"
+    con = sqlite3.connect(old)
+    con.execute("CREATE TABLE measurement (isin TEXT, trade_date TEXT, symbol TEXT, scrip_name TEXT,"
+                " mwpl INTEGER, notional_oi INTEGER, futeq_oi REAL, no_fresh_positions INTEGER,"
+                " headroom_shares INTEGER, input_sha256 TEXT, run_id TEXT)")
+    con.commit()
+    con.close()
+    with pytest.raises(StoreError, match="not TEXT"):
+        BanStateStore(old, load_calendar())
+
+
+def test_futeq_oi_reads_back_exactly_as_written(store, lock, rules):
+    """Digits a float cannot hold survive the round trip, because the column is TEXT."""
+    exact = Decimal("161020000.618356012345")
+    row = MwplRow(**{**HELD_4NOV.__dict__, "futeq_oi": exact})
+    run = start(store, lock)
+    with store.day_transaction(WED4, run.run_id):
+        store.record_measurements((row, TESTCO_4NOV), input_sha256=SHA_A)
+    assert store.measurements(WED4)[0].futeq_oi == exact
 
 
 def test_the_dirty_flag_is_recorded_not_refused(store, lock):
@@ -481,7 +505,7 @@ def test_a_changed_result_refuses_and_names_what_changed(store, lock, rules):
     write_a_day(store, first, rules)
     store.finish_run(first.run_id, RunOutcome.COMPLETED, lock=lock)
 
-    revised = MwplRow(**{**HELD_4NOV.__dict__, "futeq_oi": 161_020_001.0})
+    revised = MwplRow(**{**HELD_4NOV.__dict__, "futeq_oi": Decimal("161020001.0")})
     second = start(store, lock)
     with pytest.raises(StoreError, match="decision 11") as exc:
         with store.day_transaction(WED4, second.run_id):

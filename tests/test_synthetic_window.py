@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -60,7 +61,7 @@ def read_rows(path: Path) -> dict[dt.date, dict[str, MwplRow]]:
                 trade_date=dt.date.fromisoformat(rec["trade_date"]),
                 isin=rec["isin"], scrip_name=rec["scrip_name"], symbol=rec["symbol"],
                 mwpl=int(rec["mwpl"]), notional_oi=int(rec["notional_oi"]),
-                futeq_oi=float(rec["futeq_oi"]),
+                futeq_oi=Decimal(rec["futeq_oi"]),
                 no_fresh_positions=rec["no_fresh_positions"] == "True",
                 headroom_shares=None if rec["headroom_shares"] == "" else int(rec["headroom_shares"]),
             )
@@ -117,7 +118,7 @@ def test_each_forecast_is_what_the_next_list_says(rows, bans, rules):
 ])
 def test_each_case_on_the_12_oct_close(rows, bans, rules, symbol, util, was, will):
     r = rows[OCT12][symbol]
-    assert round(u(r), 4) == util
+    assert float(round(u(r), 4)) == util
     assert (symbol in bans[OCT12]) is was
     assert (symbol in bans[OCT13]) is will, "the fixture's answer has changed"
     assert (symbol in forecast(OCT12, rows, bans, rules)) is will
@@ -127,14 +128,14 @@ def test_the_boundary_rows_sit_exactly_on_their_lines(rows, rules):
     """Exactly, not approximately: a row at 95.00000001% would let `>=` pass this suite."""
     entry = rules.value("single_stock.ban.entry_utilisation")
     exit_ = rules.value("single_stock.ban.exit_utilisation")
-    assert u(rows[OCT12]["EDGECO"]) == entry
-    assert u(rows[OCT12]["RELEASECO"]) == exit_
+    assert u(rows[OCT12]["EDGECO"]) == Decimal(str(entry))
+    assert u(rows[OCT12]["RELEASECO"]) == Decimal(str(exit_))
 
 
 def test_a_released_scrip_back_in_the_band_stays_free(rows, bans, rules):
     """RELEASECO on 13 Oct: back in the band at 85% the day after its release - free stays free."""
     r = rows[OCT13]["RELEASECO"]
-    assert round(u(r), 4) == 0.85 and "RELEASECO" not in bans[OCT13]
+    assert float(round(u(r), 4)) == 0.85 and "RELEASECO" not in bans[OCT13]
     assert "RELEASECO" not in forecast(OCT13, rows, bans, rules)
 
 
@@ -154,7 +155,7 @@ def test_residuals_of_0_and_0_99_pass(rows, rules):
     by = {r.symbol: r.residual for r in rec.residuals}
     assert by["QUIETCO"] == 0
     assert by["EDGECO"] == 0                         # headroom exactly 0 on the entry line
-    assert by["FREECO"] == pytest.approx(0.99)
+    assert by["FREECO"] == Decimal("0.99")        # exact: 49,999.99 against NSE's 49,999
     assert {b.symbol for b in rec.barred} == {"ENTRYCO", "HOLDCO", "STICKYCO"}
 
 
@@ -189,7 +190,7 @@ def test_the_ingest_layer_refuses_to_forecast_from_a_day_with_no_list(rows, tmp_
 
     recs = [{
         "isin": r.isin, "scrip_name": r.scrip_name, "symbol": r.symbol, "mwpl": str(r.mwpl),
-        "notional_oi": str(r.notional_oi), "futeq_oi": repr(r.futeq_oi),
+        "notional_oi": str(r.notional_oi), "futeq_oi": str(r.futeq_oi),
         "no_fresh_positions": str(r.no_fresh_positions),
         "headroom_shares": "" if r.headroom_shares is None else str(r.headroom_shares),
     } for r in rows[OCT14].values()]

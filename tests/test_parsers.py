@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
+from decimal import Decimal
 
 from sentinel.parsers import (
     BanList,
@@ -229,7 +230,7 @@ def test_a_barred_row_has_no_headroom():
     assert kaynes.headroom_shares is None
     # And the formula would still have produced a POSITIVE number for it, which is why the
     # field is None rather than that number.
-    assert 0.95 * kaynes.mwpl - kaynes.futeq_oi > 0
+    assert Decimal("0.95") * kaynes.mwpl - kaynes.futeq_oi > 0
 
 
 def test_a_normal_row_carries_nses_own_headroom():
@@ -237,7 +238,7 @@ def test_a_normal_row_carries_nses_own_headroom():
     assert row.no_fresh_positions is False
     assert row.headroom_shares == 51_999_999
     # NSE truncates to whole shares, so its figure is just under the exact formula.
-    exact = 0.95 * row.mwpl - row.futeq_oi
+    exact = Decimal("0.95") * row.mwpl - row.futeq_oi
     assert 0 <= exact - row.headroom_shares < 1
 
 
@@ -246,7 +247,7 @@ def test_futeq_oi_is_fractional_and_mwpl_is_not():
     row = next(r for r in parse_mwpl_file(SAMPLE) if r.symbol == "LATCHCO")
     assert isinstance(row.mwpl, int)
     assert isinstance(row.notional_oi, int)
-    assert isinstance(row.futeq_oi, float)
+    assert isinstance(row.futeq_oi, Decimal)
     assert row.futeq_oi % 1 != 0
 
 
