@@ -15,7 +15,10 @@ instead; see the note above `ci_hits()`. Four tests, any one of which fails the 
              spaces ignored. Lines shorter than 20 characters are skipped as too generic.
   3. value - a number from combineoi or combineoi_deleq with at least 7 digits (MWPL, open
              interest, FutEq OI) appears as a standalone token, with any commas or underscores
-             removed. This is what catches a row that was re-formatted rather than copied.
+             removed. This is what catches a row that was re-formatted rather than copied. A round
+             number - two significant digits or fewer, such as 60,000,000 - is skipped: it says
+             nothing about any row, and a year of files makes coincidences with synthetic test
+             numbers certain (ANGELONE's open interest on 15 Jun 2026 was exactly 60,000,000).
   4. ban   - a "Securities in Ban For Trade Date" block lists a symbol that is a real NSE F&O
              symbol. Synthetic ban lists use made-up symbols, so they pass.
 
@@ -66,6 +69,15 @@ def _digits(tok: str) -> str:
     return tok.replace(",", "").replace("_", "")
 
 
+def _distinctive(d: str) -> bool:
+    """At least 7 digits, and more than two of them significant: 123456789 is, 60000000 is not."""
+    if sum(c.isdigit() for c in d) < MIN_DIGITS:
+        return False
+    whole, _, frac = d.partition(".")
+    significant = (whole.lstrip("0") + frac).rstrip("0") if frac.strip("0") else whole.strip("0")
+    return len(significant) > 2
+
+
 def build_oracle(data: Path):
     blobs: dict[str, str] = {}       # git blob id -> source name
     lines: dict[str, str] = {}       # data line -> source name
@@ -81,7 +93,7 @@ def build_oracle(data: Path):
         if low.startswith("combineoi"):
             for tok in NUMBER.findall("\n".join(rows[1:])):
                 d = _digits(tok)
-                if sum(c.isdigit() for c in d) >= MIN_DIGITS:
+                if _distinctive(d):
                     values.setdefault(d, name)
             if not low.startswith("combineoi_deleq"):
                 reader = csv.reader(io.StringIO("\n".join(rows)))
