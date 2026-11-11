@@ -1,13 +1,15 @@
-"""Hand-download checklists for the replay, one page per month, and a check of each finished month.
+"""A hand-download checklist for the replay, and a check of each finished month.
 
 NSE's files are downloaded by hand (DECISIONS.md #010 addendum), so this script never fetches
-anything. It writes pages of links for a person to click, and checks what that person saved.
+anything. It writes a page of links for a person to click, and checks what that person saved.
 
     python -I scripts/download_checklist.py pages [FROM] [TO]
-        One Markdown page per month in reports/downloads/ (gitignored), newest month first in the
-        index. Each page lists every date the calendar has a session on - holidays shown and
-        skipped - with both daily files: combineoi (MWPL, OI, FutEq OI) and fo_secban (the ban
-        list). Files already in data/ are ticked. FROM and TO default to 2025-10-01 and yesterday.
+        One Markdown page, reports/downloads/checklist.md (gitignored), listing only the files
+        not yet in data/: newest month first, a heading per month with its count and its check
+        command, newest date first within the month. Both daily files per session date:
+        combineoi (MWPL, OI, FutEq OI) and fo_secban (the ban list). Holidays have no files and
+        are left out. Rerun it to drop what has landed. FROM and TO default to 2025-10-01 and
+        yesterday.
 
     python -I scripts/download_checklist.py check YYYY-MM
         Checks every expected file for that month in data/: present, readable by the project's
@@ -80,51 +82,48 @@ def _expected(day: dt.date) -> list[tuple[str, str]]:
 def pages(first: dt.date, last: dt.date) -> int:
     calendar = load_calendar()
     OUT.mkdir(parents=True, exist_ok=True)
-    index = []
-    for year, month in _months(first, last):
-        lines, want, have, unknown = [], 0, 0, 0
-        title = dt.date(year, month, 1).strftime("%B %Y")
-        lines += [f"# Downloads: {title}", "", ROUTE, "",
-                  f"When this month is done: `python -I scripts/download_checklist.py check "
-                  f"{year}-{month:02d}`", "",
-                  "| date | day | calendar | combineoi | fo_secban |", "|---|---|---|---|---|"]
-        for day, kind in _days(calendar, year, month, first, last):
+    sections, total_want, total_missing = [], 0, 0
+    for year, month in sorted(_months(first, last), reverse=True):
+        missing, unknown = [], set()
+        days = sorted(_days(calendar, year, month, first, last), reverse=True)
+        for day, kind in days:
             if kind is DayKind.HOLIDAY:
-                lines.append(f"| {day} | {day:%a} | holiday | - | - |")
                 continue
-            if kind is DayKind.UNKNOWN:
-                unknown += 1
-            cells = []
             for name, url in _expected(day):
-                want += 1
-                done = (DATA / name).is_file()
-                have += done
-                cells.append(f"{'[x]' if done else '[ ]'} [{name}]({url})")
-            label = {"trading": "trading", "special_session": "special session",
-                     "unknown": "**not in calendar**"}[kind.value]
-            lines.append(f"| {day} | {day:%a} | {label} | {cells[0]} | {cells[1]} |")
+                total_want += 1
+                if not (DATA / name).is_file():
+                    missing.append((day, kind, name, url))
+                    if kind is DayKind.UNKNOWN:
+                        unknown.add(day)
+        if not missing:
+            continue
+        total_missing += len(missing)
+        title = dt.date(year, month, 1).strftime("%B %Y")
+        lines = [f"## {title}: {len(missing)} file(s)", "",
+                 f"When this section is done: `python -I scripts/download_checklist.py check "
+                 f"{year}-{month:02d}`", ""]
         if unknown:
-            lines += ["", f"**{unknown} date(s) here are not in the calendar.** It covers only the "
-                      f"years whose NSE holiday circular is recorded in `config/calendar_2026.csv`. "
-                      f"Some of these weekdays are holidays and have no files; the runner refuses "
-                      f"every one of them until the calendar is extended from NSE's circular for "
-                      f"{year}."]
-        page = OUT / f"{year}-{month:02d}.md"
-        page.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
-        index.append((year, month, title, want, have, unknown))
+            lines += [f"**{len(unknown)} date(s) in this month are not in the calendar.** Some of "
+                      f"these weekdays are holidays and have no files, and the runner refuses all of "
+                      f"them until the calendar is extended from NSE's holiday circular for {year}. "
+                      f"Extend it before downloading this month, then rerun `pages`.", ""]
+        for day, kind, name, url in missing:
+            note = {"special_session": " (special session)",
+                    "unknown": " (not in calendar)"}.get(kind.value, "")
+            lines.append(f"- [ ] {day:%a} {day}{note}: [{name}]({url})")
+        sections.append("\n".join(lines))
 
-    total_want = sum(i[3] for i in index)
-    total_have = sum(i[4] for i in index)
-    head = [f"# Replay downloads, {first} to {last}", "",
-            f"{total_have} of {total_want} files in data/; {total_want - total_have} to download.",
-            "Newest month first.", "", "| month | files | in data/ | to do | note |",
-            "|---|---|---|---|---|"]
-    for year, month, title, want, have, unknown in sorted(index, reverse=True):
-        note = f"{unknown} date(s) not in calendar" if unknown else ""
-        head.append(f"| [{title}]({year}-{month:02d}.md) | {want} | {have} | {want - have} | {note} |")
-    (OUT / "index.md").write_text("\n".join(head) + "\n", encoding="utf-8", newline="\n")
-    print(f"wrote {len(index)} month pages and index.md to {OUT.relative_to(REPO).as_posix()}: "
-          f"{total_have} of {total_want} files already in data/")
+    head = [f"# Replay downloads still to do, {first} to {last}", "",
+            f"{total_missing} of {total_want} files to download; files already in data/ are left "
+            f"out, and holidays have none. Newest month first.", "", ROUTE, ""]
+    page = OUT / "checklist.md"
+    page.write_text("\n".join(head) + "\n" + "\n\n".join(sections) + "\n",
+                    encoding="utf-8", newline="\n")
+    for old in OUT.glob("*.md"):                    # the per-month pages this replaced
+        if old.name != page.name:
+            old.unlink()
+    print(f"wrote {page.relative_to(REPO).as_posix()}: {total_missing} of {total_want} files "
+          f"still to download, in {len(sections)} month section(s)")
     return 0
 
 
