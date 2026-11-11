@@ -1,5 +1,26 @@
 date,kind,description,source
+year_covered,holiday,2025,NSE/FAOP/65588 ref 161/2024 dated 13 Dec 2024 - notifies trading holidays for the calendar year 2025
+2025-01-26,holiday,Republic Day (Sunday),NSE/FAOP/65588 ref 161/2024
+2025-02-26,holiday,Mahashivratri,NSE/FAOP/65588 ref 161/2024
+2025-03-14,holiday,Holi,NSE/FAOP/65588 ref 161/2024
+2025-03-31,holiday,Id-Ul-Fitr / Ramadan Eid,NSE/FAOP/65588 ref 161/2024
+2025-04-06,holiday,Shri Ram Navami (Sunday),NSE/FAOP/65588 ref 161/2024
+2025-04-10,holiday,Shri Mahavir Jayanti,NSE/FAOP/65588 ref 161/2024
+2025-04-14,holiday,Dr Baba Saheb Ambedkar Jayanti,NSE/FAOP/65588 ref 161/2024
+2025-04-18,holiday,Good Friday,NSE/FAOP/65588 ref 161/2024
+2025-05-01,holiday,Maharashtra Day,NSE/FAOP/65588 ref 161/2024
+2025-06-07,holiday,Bakri Id (Saturday),NSE/FAOP/65588 ref 161/2024
+2025-07-06,holiday,Muharram (Sunday),NSE/FAOP/65588 ref 161/2024
+2025-08-15,holiday,Independence Day,NSE/FAOP/65588 ref 161/2024
+2025-08-27,holiday,Ganesh Chaturthi,NSE/FAOP/65588 ref 161/2024
+2025-10-02,holiday,Mahatma Gandhi Jayanti / Dussehra,NSE/FAOP/65588 ref 161/2024
+2025-10-21,special_session,Diwali Laxmi Pujan - Muhurat Trading; timings notified separately,NSE/FAOP/65588 ref 161/2024 - "Muhurat Trading will be conducted on Tuesday October 21 2025"
+chaining_verified,special_session,2025-10-21,observed 11 Nov 2026 (not a circular): combineoi_21102025.zip sha256 532b022eeeb34c67ad48f2b506118d9e7b273b34cee30064754db78207179fde and fo_secban_21102025.csv sha256 fe61a3b6c2a3c6f0db38f7299e8e0f5f286cf8133e15e3d75688e4fa6df2fe3f - both exist and are dated 21-OCT-2025 inside; FutEq OI moved on 209/209 scrips against 20 Oct and again into 23 Oct; MWPL unchanged; Limit for Next Day recomputed on 208/208 both times; the 21 Oct ban list differs from 20 Oct's (RBLBANK released) and 23 Oct's equals it; DECISIONS.md #013
+2025-10-22,holiday,Diwali-Balipratipada,NSE/FAOP/65588 ref 161/2024
+2025-11-05,holiday,Prakash Gurpurb Sri Guru Nanak Dev,NSE/FAOP/65588 ref 161/2024
+2025-12-25,holiday,Christmas,NSE/FAOP/65588 ref 161/2024
 year_covered,holiday,2026,NSE/FAOP/71777 ref 212/2025 dated 12 Dec 2025 - notifies trading holidays for the calendar year 2026
+2026-01-15,holiday,Municipal Corporation Election in Maharashtra,NSE/FAOP/72262 ref 04/2026 dated 12 Jan 2026 - in partial modification of NSE/FAOP/71777
 2026-01-26,holiday,Republic Day,NSE/FAOP/71777 ref 212/2025
 2026-02-15,holiday,Mahashivratri (Sunday),NSE/FAOP/71777 ref 212/2025
 2026-03-03,holiday,Holi,NSE/FAOP/71777 ref 212/2025

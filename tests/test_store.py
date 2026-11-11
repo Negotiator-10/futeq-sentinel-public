@@ -327,7 +327,8 @@ def test_a_special_session_is_a_state_not_a_flag():
     """
     cal = load_calendar()
     assert cal.kind(MUHURAT) is DayKind.SPECIAL_SESSION
-    assert cal.special_sessions == (MUHURAT,)
+    # and 2025's, Tue 21 Oct 2025, from NSE/FAOP/65588 - a weekday holiday with a session in it
+    assert cal.special_sessions == (dt.date(2025, 10, 21), MUHURAT)
 
     # a session happened, so its files are real - but it is not a normal trading day
     assert cal.has_session(MUHURAT) is True
@@ -473,10 +474,28 @@ def test_the_store_refuses_a_special_session_whose_seed_would_need_chaining(tmp_
 # -- the real calendar, loaded from the circular -------------------------------------------
 
 
-def test_the_loaded_calendar_covers_the_whole_year():
+def test_the_loaded_calendar_covers_both_whole_years():
+    """2025 from NSE/FAOP/65588 and 2026 from NSE/FAOP/71777, every day of each (#020)."""
     cal = load_calendar()
-    assert len(cal) == 365
-    assert cal.covered == (dt.date(2026, 1, 1), dt.date(2026, 12, 31))
+    assert len(cal) == 365 + 365
+    assert cal.covered == (dt.date(2025, 1, 1), dt.date(2026, 12, 31))
+
+
+def test_a_holiday_added_after_the_years_circular_is_a_holiday():
+    """15 Jan 2026 was notified on 12 Jan 2026 by NSE/FAOP/72262, in partial modification of
+    71777. The replay found it first, as a weekday with no files; the walk now steps over it."""
+    cal = load_calendar()
+    assert cal.kind(dt.date(2026, 1, 15)) is DayKind.HOLIDAY
+    assert cal.next_trading_day(dt.date(2026, 1, 14)) == dt.date(2026, 1, 16)
+
+
+def test_the_2025_muhurat_session_chains():
+    """Its own files say so (#013): the walk from 20 Oct stops on it, and 23 Oct looks back to it."""
+    cal = load_calendar()
+    muhurat = dt.date(2025, 10, 21)
+    assert muhurat in cal.chaining_verified
+    assert cal.next_trading_day(dt.date(2025, 10, 20)) == muhurat
+    assert cal.previous_trading_day(dt.date(2025, 10, 23)) == muhurat
 
 
 def test_twenty_october_is_a_verified_holiday_now():

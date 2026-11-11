@@ -230,6 +230,8 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `fo_secban_31072026.csv` | 50 | `dc88eacec3c258d37f504f1cc21d8af920dde78517746ce6083393abb1ef3a01` |
 | `combineoi_01102025.zip` | 20,565 | `e61487fb38d1f3c39d3a2031af1e4cfd38e2985f5b6ea20fa67a23edc5536395` |
 | `fo_secban_01102025.csv` | 59 | `b1648ca604f9ded512176297d3c2f5f8e8eef6bd51c8886b7f74544584aad976` |
+| `FAOP65588.pdf` | 134,297 | `e359379d4d7bc0296cea9b9bb1deda6d8460957cf49209208525da5a25ed7629` |
+| `FAOP72262.pdf` | 79,468 | `f98ae37cf6a6f8c18b1064b0551599d084c4b4a27804842c487f0da43fea8f0f` |
 
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
