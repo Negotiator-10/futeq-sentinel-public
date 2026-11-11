@@ -89,9 +89,13 @@ Stated plainly, because the thing above is the only claim I want read as finishe
   keyed on the account `(tm, ucc)`, with a written-down marker for a flat day - and SPEC row 6,
   that trading in a banned scrip must reduce FutEq OI, is checked and reproduces SEBI's own
   worked example. It has run on synthetic books only, never a real one. Row 7, the entity
-  limits, has its holder and account reference tables but not the check itself. Rows 8 to 10,
-  the index-option limits at end of day and intraday, are specified in `config/rules.yaml` and
-  not written.
+  limits, has its holder and account reference tables but not the check itself.
+* **Not covered, by decision (`DECISIONS.md` #020).** The index-derivative limits - SPEC rows 8,
+  9, 10, 13, 14 and 16, for index options and futures at end of day and intraday - are specified
+  in `SPEC.md` and `config/rules.yaml` and not written. Row 15, intraday MWPL monitoring for
+  single stocks, is out too: it needs intraday positions, and every file here is end of day. The
+  order-to-trade ratio module and a live forecast page are cut as well. The time went to a
+  replay of every trading day since 1 Oct 2025.
 * **It is a reconciliation, not a forecast with a time advantage.** NSE publishes its own
   next-day ban determination in the same file the engine computes from, so there is no lead of
   any size. What this does is reproduce the exchange's determination independently and reconcile

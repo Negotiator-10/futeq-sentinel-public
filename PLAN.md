@@ -63,6 +63,20 @@ Why: the trading calendar, Muhurat chaining, expiry, flat-day and
 (tm, ucc) keying work took the time planned for these. That was the
 right trade, because those are what make the result trustworthy.
 
+### Scope change, 11 Nov 2026 (#020)
+
+- **The replay is every trading day from 1 Oct 2025** (Week 4 D1, as planned), downloaded by hand
+  one month at a time, newest first, from the pages `scripts/download_checklist.py` writes. About
+  3.5 hours of downloads, spread over sessions. **First, the calendar is extended to 2025** from
+  NSE's 2025 holiday circular; until then October to December 2025 cannot be replayed.
+- **Cut:** the live page (automation 9b) and OTR, which add no evidence; and the index-derivative
+  rows, SPEC 8, 9, 10, 13, 14 and 16, from Week 4 D4. The README lists them as not yet covered.
+  Row 15, intraday MWPL monitoring for single stocks, is cut too: it needs intraday data, and
+  every file here is end of day. The time goes to the replay and row 7.
+
+Why: a year of real days is the only way to check the reset calendar for all four quarters and to
+get real transitions, in-band days and boundary rows in numbers that mean something.
+
 ## Week 3 (Thu 12 to Wed 18 Nov): limit engine, data quality, circular watcher
 | Day | Work |
 |---|---|
@@ -85,7 +99,7 @@ Interview questions:
 | D1 Thu 19 Nov | Replay every trading day since 1 Oct 2025. Score the ban forecasts against NSE's published ban list (precision and recall) and measure the utilisation error. |
 | D2 Fri 20 Nov | Explain every mismatch and write it up. This is the headline result. |
 | D3 Sat 21 Nov | A synthetic prop book. Entity limits: 10% of MWPL for a client, 20% for the member's own book, 30% combined. |
-| D4 Mon 23 Nov | Intraday index-option limits (Rs 5,000 cr net, Rs 10,000 cr gross, Rs 1,500 cr at end of day) with at least 4 random snapshots. A ban-period checker that flags an increase or a sign flip against the base. |
+| D4 Mon 23 Nov | ~~Intraday index-option limits (Rs 5,000 cr net, Rs 10,000 cr gross, Rs 1,500 cr at end of day) with at least 4 random snapshots.~~ Cut (#020): replay and row 7 instead. A ban-period checker that flags an increase or a sign flip against the base (done: row 6). |
 | D5 Tue 24 Nov | A penalty calculator with edge-case tests. **Automation 3:** Telegram alerts for forecast bans, breaches, breaks older than 2 days, and late or failed files. |
 | D6 Wed 25 Nov | Teach-back. Draft the headline: "matched NSE's ban list on X of Y days". |
 
@@ -97,9 +111,9 @@ Interview questions:
 ## Week 5 (Thu 26 Nov to Wed 2 Dec): OTR, reports, live page, v1.0
 | Day | Work |
 |---|---|
-| D1 Thu 26 Nov | **OTR module.** The 2026 exemption bands go in config, marked "unverified" until checked against the circular. Compare old and new rules on synthetic order logs. |
+| D1 Thu 26 Nov | ~~**OTR module.**~~ Cut (#020). |
 | D2 Fri 27 Nov | **Automation 4:** an evening HTML/PDF morning report, including a section in NSE's SOP column layout. |
-| D3 Sat 28 Nov | **Automation 9b:** a scheduled run and a live GitHub Pages forecast page. If NSE blocks cloud downloads, run it locally and push the result. |
+| D3 Sat 28 Nov | ~~**Automation 9b:** a scheduled run and a live GitHub Pages forecast page.~~ Cut (#020): no automated downloads are allowed (#010 addendum), and a live page adds no evidence. |
 | D4 Mon 30 Nov | A README that leads with results, plus the spec and a diagram. A CLI command, `sentinel replay --from 2025-10-01`. A check that runs are byte-reproducible. |
 | D5 Tue 1 Dec | A technical note (6 to 10 pages): what it does, how it was validated, and what it cannot see. Verify every fact in the regulatory table against SEBI and NSE. |
 | D6 Wed 2 Dec | **Release v1.0.** Send it to NK, Qode, Graviton and iRage as a follow-up. Full mock interview. |
@@ -120,7 +134,7 @@ All 9 automations:
 - [ ] 7. Circular watcher (W3)
 - [ ] 8. Break workflow (W2). Moved to v1.0.
 - [x] 9a. Automatic tests on every push (W1)
-- [ ] 9b. Scheduled run and live page (W5)
+- [ ] 9b. Scheduled run and live page (W5). Cut (#020).
 
 Engine:
 - [x] Spec
@@ -135,7 +149,7 @@ Engine:
 - [ ] Entity and intraday limits. Row 7 is a stub; designed in #016, built in Week 3.
 - [x] Ban-period checker (row 6)
 - [ ] Penalties
-- [ ] OTR module
+- [ ] OTR module. Cut (#020).
 - [ ] NSE-format daily report
 
 Releases:

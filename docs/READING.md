@@ -221,6 +221,15 @@ files live in `data/` (gitignored); only these descriptions are tracked.
 | `combineoi_05112026.zip` | 22,227 | `9a29fff3a287f474511061be17893e3c933fb2e1875fd34bf8a1f6c5265e5656` |
 | `combineoi_30092026.zip` | 21,721 | `677053ce0b6a4c59cfb048e28e907794231d5bae41bd89e839f020c8c482eba5` |
 | `combineoi_01102026.zip` | 21,682 | `460f6a8e615bbb25c4566593ab4f4bd28127a1005e52d3e5c962f3cc511e90f5` |
+| `combineoi_16102026.zip` | 21,746 | `8a4cb85b52f11982fae472822b92f40e22dd0ecb3bf0247a1d580e0e03739dda` |
+| `combineoi_19102026.zip` | 21,732 | `b350102cb581e9f6e9cc0a18fc0f973e86e1f917939707b6a8eca321818c72e3` |
+| `combineoi_21102026.zip` | 21,777 | `ff09be9f4da626294b7934e22c344ca62fceb87d7250c83d5caabf92dbc672d8` |
+| `combineoi_22102026.zip` | 21,730 | `5dcda974583e597271390f71c74e21342ea2e287f7a9551903aa1a27c287ca99` |
+| `combineoi_23102026.zip` | 21,750 | `5ea5b3e4a3ba326e57c27edc1386f7b9426614aab0129c2cf56b3a28a6deeaeb` |
+| `combineoi_31072026.zip` | 20,762 | `2554c659a639fd2b5f893059cd2e0a16bf83fc6859084ad0ab3f43d2f9499790` |
+| `fo_secban_31072026.csv` | 50 | `dc88eacec3c258d37f504f1cc21d8af920dde78517746ce6083393abb1ef3a01` |
+| `combineoi_01102025.zip` | 20,565 | `e61487fb38d1f3c39d3a2031af1e4cfd38e2985f5b6ea20fa67a23edc5536395` |
+| `fo_secban_01102025.csv` | 59 | `b1648ca604f9ded512176297d3c2f5f8e8eef6bd51c8886b7f74544584aad976` |
 
 Ban lists for 12 to 29 Oct, fetched 6 Nov 2026 through the built-in browser from NSE's same-origin
 endpoint `www.nseindia.com/api/reports` (archive "F&O - Security in ban period"). That endpoint
@@ -593,6 +602,21 @@ MWPL's limbs binds is already on the gaps list in `LEARNING.md`.
 
 Also seen in the same comparison: 3 scrips added and 1 removed between 26 Aug and 30 Sep, and 6
 added on 28 Oct - changes to the F&O list itself, which the reference-data detector is for.
+
+### The FutEq basis was already in force on 1 Oct 2025 (checked 11 Nov 2026)
+
+The first file of the replay window, `combineoi_01102025.zip`, carries the same eight columns as
+today's, including `Future Equivalent Open Interest`, and its `Limit for Next Day` matches
+`0.95 x MWPL - FutEq OI` on **207 of 207** numeric rows and the notional formula on **0 of 207**.
+The same test gives 208 of 208 on 31 Jul 2026 and 216 of 216 on 30 Oct 2026. That agrees with
+2025/79 para 6 (table above): FutEq OI was "already implemented", and what changed on
+1 Oct 2025 was the MWPL definition, position creation during the ban period, and entity limits.
+So 1 Oct 2025 is the first day of the regime this project implements, and the replay starts
+there, not earlier.
+
+Archive depth, checked by hand on 10 Nov 2026: both daily files download for Fri 31 Jul 2026
+and Wed 1 Oct 2025, so NSE's archive reaches at least 1 Oct 2025. Five `combineoi` files (16, 19,
+21, 22, 23 Oct 2026) took 2 minutes 3 seconds by hand, about 25 seconds a file.
 
 ## `combineoi_deleq_<ddmmyyyy>.csv` — delta-equivalent OI, stocks and indices
 `Date, ISIN, Scrip Name, Symbol, Notional Open Interest, Portfolio-wise Futures Equivalent Open

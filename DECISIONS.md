@@ -1353,3 +1353,59 @@ the refusal record and run log.
 **Outcome.** Accepted, 9 Nov 2026. Store tables (run_log, measurement,
 reconciliation, row6_check, refusal) built as plumbing; the runner
 itself is mine, Tue 10 Nov.
+
+
+## #020: The replay window, and what is cut for it, 11 Nov 2026
+<!-- Authorship. The window, the reasons, the cuts and the rules.yaml approach are mine, written
+     up from my 11 Nov notes. Claude checked the FutEq basis of the 1 Oct 2025 file, found that
+     the calendar does not cover 2025, corrected the SPEC rows the index cut names (row 15 is not
+     an index row, and I cut it separately), and filed this. -->
+
+**What.** The replay covers every trading day from **1 Oct 2025** to now: option A of the three I
+weighed. About 520 files, downloaded by hand one month at a time, newest first, each month
+checked before the next is started. Cut to make room for it: the **live page** (automation 9b)
+and **OTR**, since neither adds evidence; the **index-derivative rows**, SPEC 8, 9, 10, 13, 14
+and 16, from Week 4; and **row 15**, intraday MWPL monitoring for single stocks, because it needs
+intraday data and every file this project has is end of day. They go in the README as not
+covered, and the time goes to the replay and row 7.
+
+**Why.**
+- It is the only window that can verify the MWPL reset calendar for all four quarters, not only
+  October.
+- It gives far more real transitions, in-band days and expiries than the current 15 sessions.
+- It is the best chance of a real scrip closing exactly on 95% or 80%, which no real row has done.
+- If it finds days where the engine disagrees with NSE, that is what the replay is for. I will
+  record each one and why.
+- 1 Oct 2025 is the right start, not earlier: it is the first day of the regime the project
+  implements (2025/79 para 6 - the MWPL definition, ban-period position creation and entity
+  limits all took effect that day), and FutEq OI was already the basis.
+
+**Evidence.**
+- **Archive depth,** checked by hand on 10 Nov: both daily files download for Fri 31 Jul 2026 and
+  Wed 1 Oct 2025, so NSE's archive reaches at least the start of the window.
+- **Timing,** by hand: five `combineoi` files (16, 19, 21, 22, 23 Oct 2026) in 2 minutes 3
+  seconds, about 25 seconds a file. 508 files still to fetch is about 3.5 hours, spread over
+  several sessions.
+- **The FutEq basis on day one:** `combineoi_01102025.zip` has the same eight columns as today's,
+  and its `Limit for Next Day` matches `0.95 x MWPL - FutEq OI` on 207 of 207 rows and the
+  notional formula on 0. Checksums of all nine files in `docs/READING.md`.
+- **The reset, so far:** MWPL changed for 158 of 213 scrips between 30 Sep and 1 Oct 2026 and on
+  no other pair of days (READING.md). October is observed; January, April and July are not.
+
+**Consequences.**
+1. **The calendar must be extended to 2025 first.** `config/calendar_2026.csv` covers only the
+   year whose NSE holiday circular it cites, so every date from 1 Oct to 31 Dec 2025 is UNKNOWN
+   and the runner refuses it. It needs NSE's holiday circular for 2025, read and cited the same
+   way as 2026's, before those 66 days can be replayed. Until then their checklist pages list
+   every weekday and say so.
+2. **`reset_calendar` stays `verified: null`,** with a note recording October as observed from
+   the 30 Sep and 1 Oct files. The replay should let me observe January, April and July too.
+3. **Downloads are tracked by `scripts/download_checklist.py`:** one page of links per month in
+   `reports/downloads/` (gitignored), and a `check` that verifies a finished month - present,
+   readable, dated as named, no stray copies - and records each file's size and sha256 in
+   `docs/data_manifest.csv`. That manifest replaces hand-pasting rows into READING.md's table.
+4. **Row 15 is cut on its own reason, not as an index row.** It is single-stock intraday MWPL
+   monitoring - at least four random checks a session, for Additional Surveillance Margin - and
+   it needs intraday positions, which no end-of-day file carries.
+
+**Outcome.** Accepted, 11 Nov 2026. Downloads start with November 2026, newest first.
