@@ -533,10 +533,10 @@ No real row closed exactly on either line, so the boundaries remain tested only 
 | 30 Jun -> 1 Jul 2026 | 153 of 210 |
 | 30 Sep -> 1 Oct 2026 | 158 of 213 |
 
-Overnight, on the first trading day of each quarter, and nowhere else at that scale. The data
-now supports `reset_calendar: [1, 4, 7, 10]` for every month, but `config/rules.yaml` still
-records it as an assumption until the observation is written there, sourced to these eight
-files. The 1 Oct 2025 reset itself falls just before the window and is not seen.
+Overnight, on the first trading day of each quarter, and nowhere else at that scale. On
+11 Nov 2026 `reset_calendar: [1, 4, 7, 10]` in `config/rules.yaml` moved from an assumption to an
+observation, sourced to these eight files, with a note to re-check each quarter. The 1 Oct 2025
+reset itself falls just before the window and is not seen.
 
 On eight other days a single scrip's MWPL moved mid-quarter (for example 14 Nov 2025 and 13 Jan
 2026): not a reset, most likely a corporate action changing the share count. That is the kind of

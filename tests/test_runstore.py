@@ -214,8 +214,9 @@ def test_the_rules_status_is_recorded_as_keys_and_read_back(store, lock):
 
 
 def test_the_real_rules_status_round_trips(store, lock, rules):
+    """No assumed keys are left since 11 Nov 2026, so an empty list must round-trip as one."""
     status = {"assumed": list(rules.assumed), "unverified": list(rules.unverified)}
-    assert rules.assumed, "rules.yaml has assumed keys today; this test means nothing without them"
+    assert rules.unverified, "rules.yaml has unverified keys today; this test means less without them"
     run = start(store, lock, rules_status=status)
     assert run.rules_status["assumed"] == tuple(sorted(rules.assumed))
     assert run.rules_status["unverified"] == tuple(sorted(rules.unverified))

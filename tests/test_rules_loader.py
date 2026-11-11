@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import textwrap
+import warnings
 
 import pytest
 
@@ -208,17 +209,43 @@ def test_an_unverified_rule_can_still_be_described(rules):
     assert "Exchange" in threshold.source
 
 
-def test_the_reset_calendar_is_assumed_not_verified(rules):
-    assert rules.assumed == ("single_stock.mwpl.reset_calendar",)
+def test_the_reset_calendar_is_observed_not_assumed(rules):
+    """An assumption until 11 Nov 2026; then seen in all four quarters by the year's replay. It
+    is sourced as an observation, the way the calendar's Muhurat verdicts are, not as a citation."""
+    assert rules.assumed == ()
     threshold = rules.describe("single_stock.mwpl.reset_calendar")
-    assert threshold.verified is None
+    assert threshold.verified == dt.date(2026, 11, 11)
     assert threshold.value == [1, 4, 7, 10]
+    assert threshold.source.startswith("observed (not a circular)")
+    for f in ("combineoi_31122025.zip", "combineoi_01012026.zip", "combineoi_30032026.zip",
+              "combineoi_01042026.zip", "combineoi_30062026.zip", "combineoi_01072026.zip",
+              "combineoi_30092026.zip", "combineoi_01102026.zip"):
+        assert f in threshold.source
 
 
-def test_loading_warns_about_assumed_thresholds():
-    """An assumption must announce itself at least once per run."""
-    with pytest.warns(UserWarning, match="rest on an assumption"):
+def test_the_real_config_loads_with_no_assumption_warning():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
         load_rules()
+
+
+def test_loading_warns_about_assumed_thresholds(tmp_path):
+    """An assumption must announce itself at least once per run. The real config has none left,
+    so the warning is tested on one built for it."""
+    path = write_config(
+        tmp_path,
+        """
+        single_stock:
+          made_up:
+            threshold:
+              value: 3
+              source: "ASSUMPTION - a test of the warning"
+              verified: null
+        """,
+    )
+    with pytest.warns(UserWarning, match="rest on an assumption"):
+        rules = load_rules(path)
+    assert rules.assumed == ("single_stock.made_up.threshold",)
 
 
 # ---------------------------------------------------------------------------

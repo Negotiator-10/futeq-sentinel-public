@@ -9,7 +9,8 @@
 #     value:    the number or flag, as the engine uses it (fractions, not percents)
 #     operator: how the comparison is made, where a boundary has a direction. Omit otherwise
 #     source:   circular and paragraph. Never "SEBI", never "the FAQ"
-#     verified: the date I read that paragraph, or null when the source is an ASSUMPTION
+#     verified: the date I read that paragraph (or recorded an observation, source beginning
+#               "observed"), or null when the source is an ASSUMPTION
 #     note:     anything a reader would otherwise get wrong. Prose belongs here, never in `value`
 #
 # `operator` exists because of what 2 Nov turned up: ban entry is "exceeds 95%" and ban exit is
@@ -83,9 +84,21 @@ single_stock:
       note: "Rolling ADDV over the preceding three months. The circular names no reset MONTHS, so reset_calendar below is an assumption, not a citation."
     reset_calendar:
       value: [1, 4, 7, 10]
-      source: "ASSUMPTION - not in any circular I have read"
-      verified: null
-      note: "Calendar quarters. Row 3's test depends on this. If NSE resets on a different cycle, every MWPL between resets is wrong."
+      verified: 2026-11-11
+      source: >-
+        observed (not a circular): SEBI 2025/79 para 5.2.4 says "quarterly" and names no months.
+        In the 1 Oct 2025 to 9 Nov 2026 replay, MWPL changed at scale only on the first trading
+        day of each quarter -
+        Jan 2026: 159 of 208 scrips, combineoi_31122025.zip -> combineoi_01012026.zip;
+        Apr 2026: 153 of 205, combineoi_30032026.zip -> combineoi_01042026.zip (31 Mar a holiday);
+        Jul 2026: 153 of 210, combineoi_30062026.zip -> combineoi_01072026.zip;
+        Oct 2026: 158 of 213, combineoi_30092026.zip -> combineoi_01102026.zip.
+        Checksums of all eight files in docs/data_manifest.csv; the replay in docs/READING.md.
+      note: >-
+        Observed for one year only - what NSE did, not a rule it has stated. Re-check at each
+        quarter. Single-scrip MWPL moves mid-quarter do happen (eight days in the replay, most
+        likely corporate actions); an MWPL change for many scrips on any other day should be
+        treated as a data-quality alert. Row 3's test depends on this.
 
   # Row 2. No threshold, but a real behavioural switch: three implementations are plausible and
   # row 2's test distinguishes all three, so the convention is configuration.

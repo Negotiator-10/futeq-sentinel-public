@@ -208,7 +208,9 @@ def test_the_footer_carries_the_run_log(tmp_path, stand_ins):
     assert run.run_id in footer and run.started_at in footer and run.finished_at in footer
     assert run.rules_checksum in footer and run.calendar_checksum in footer
     assert "forecast date 2026-10-14" in footer
-    assert ", ".join(rules.assumed) in footer
+    assumed = ", ".join(rules.assumed) if rules.assumed else "none"
+    assert f"assumed rules, used without a citation: {assumed}" in footer
+    assert f"unverified rules, refused: {', '.join(sorted(rules.unverified))}" in footer
     for name, sha in run.input_checksums.items():
         assert f"`{name}` `{sha}`" in footer
 

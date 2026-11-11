@@ -76,11 +76,11 @@ publishes exactly it. On one of them, float arithmetic put mine four billionths 
 which fails `[0, 1)` on a correct row. FutEq OI is now kept as the exact published decimal from the parser
 onwards, and a float is refused.
 
-**MWPL resets, observed in the data.** The limits change overnight on the first trading day of
-each quarter - 1 January, 1 April, 1 July and 1 October 2026 - for about three-quarters of
+**MWPL resets, observed rather than assumed.** The limits change overnight on the first trading
+day of each quarter - 1 January, 1 April, 1 July and 1 October 2026 - for about three-quarters of
 scrips, and hold still in between. The circular says only "quarterly", so `config/rules.yaml`
-still marks the reset months as an assumption; recording this observation there, with the eight
-files either side of each reset as its source, is the next step.
+now records the reset months as an observation, sourced to the eight files either side of the
+resets, with a note that one year of evidence is to be re-checked each quarter.
 
 ## What it does not do yet
 
