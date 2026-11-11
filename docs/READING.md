@@ -451,6 +451,97 @@ Two properties make the load safe to repeat, which is what `PLAN.md` D5 means by
   values and the scrips named. An input that changed under us is a finding rather than
   something to overwrite, and the `input_sha256` on every row is what makes it detectable.
 
+## The year's replay, 1 Oct 2025 to 9 Nov 2026 (run 11 Nov 2026)
+
+Every session from the first day of the 2025/79 regime (#020) to the last published list: 273
+`combineoi` files and 273 ban lists, all downloaded by hand and recorded with their sha256 in
+`docs/data_manifest.csv`. The calendar covers 2025 from NSE/FAOP/65588 and 2026 from
+NSE/FAOP/71777, with 15 Jan 2026 added from NSE/FAOP/72262. Two of the 273 are Muhurat sessions,
+21 Oct 2025 and 8 Nov 2026; both chain, from their own files (#013). The lists are consecutive in
+the calendar, with no gap that could split a ban in two.
+
+Reproduce it with `python scripts/score_bans.py` (the score) or by running
+`python -m sentinel.runner` for each session (the whole pipeline). Both were run on 11 Nov 2026,
+after the Decimal fix below.
+
+### The score
+
+| | |
+|---|---|
+| Forecasts scored | 272 (9 Nov 2026's answer, 11 Nov's list, was not yet published) |
+| Scrip-days agreeing | 56,997 of 56,997 |
+| Transitions forecast correctly | 90 of 90: 45 entries, 45 releases |
+| Scrip-days in the 80-95% band | 1,130: 342 held, 788 stayed out, 0 wrong |
+| "Never banned" baseline | 99.25% |
+| Runner, all 273 sessions | 273 COMPLETED; the only refusal was row 6 (no book, no deltas), every day |
+| Forecasts scored inside the store | 56,972 of 56,972 - 25 fewer than the score, the 25 times a scrip left F&O overnight and the next day has no row to pair with |
+
+### The bans
+
+46 episodes across 11 stocks, 428 banned scrip-days, median episode 9 sessions. One episode was
+already open on the first list (SAMMAANCAP, 1 Oct 2025) and one still open on the last.
+
+| Longest bans | From | To | Sessions |
+|---|---|---|---|
+| SAIL | 27 Aug 2026 | 8 Oct 2026 | 29 |
+| SAMMAANCAP | 26 Feb 2026 | 25 Mar 2026 | 19 |
+| KAYNES | 2 Jun 2026 | 24 Jun 2026 | 17 |
+| SAIL | 5 Mar 2026 | 30 Mar 2026 | 17 |
+| AMBUJACEM | 5 Oct 2026 | 27 Oct 2026 | 16 |
+
+| Most banned | Sessions in ban | Episodes |
+|---|---|---|
+| SAIL | 133 | 10 |
+| SAMMAANCAP | 93 | 10 |
+| KAYNES | 69 | 9 |
+| BANDHANBNK | 39 | 5 |
+| LICHSGFIN | 20 | 3 |
+| MANAPPURAM | 20 | 1 |
+
+### How close the lines came
+
+No real row closed exactly on either line, so the boundaries remain tested only on synthetic files.
+
+- **Entry, 95%:** SAIL on 14 Oct 2026, 95.013539% (+0.0135 pts), banned next day. Then KAYNES on
+  9 Jul 2026, 95.017405%, and SAIL on 24 Oct 2025, 95.023006%. All three were forecast correctly.
+- **Exit, 80%, any scrip:** LICI on 21 Aug 2026, 80.003951% (+0.0040 pts), but LICI was free, so it
+  does not test the exit's inclusivity.
+- **Exit, 80%, a scrip in ban** - the case that would: BANDHANBNK on 21 Sep 2026, 80.140048%
+  (+0.14 pts), held. The closest release came from LICHSGFIN at 79.79%, effective 11 Sep 2026.
+
+### Reconciliation: one real disagreement, and one bug of mine
+
+`0.95 x MWPL - FutEq OI` against NSE's published `Limit for Next Day`, signed, in `[0, 1)`:
+56,786 of 56,787 rows. The notional formula matches 22, coincidence. All 428 rows NSE flagged
+`No Fresh Positions` sat above the 80% exit.
+
+- **TRENT, 3 Jun 2026: the one disagreement.** NSE published one share less than truncating the
+  exact formula gives (residual +1.3137). The safe direction - less headroom, not more - and the
+  cause is not visible in the file. Kept failing, as a known exception, in
+  `tests/test_nse_local.py`; widening the test to pass it would discard the finding.
+- **NAM-INDIA, 7 Apr 2026: a float bug, now fixed.** Its exact headroom was a whole number and NSE
+  published exactly it; float arithmetic put ours 4e-9 below. Five rows in the year have a
+  whole-number exact headroom, and this was the one where the float error went negative. FutEq OI
+  is now parsed, stored and computed as an exact Decimal, and a float is refused (`ef23129`).
+
+### MWPL resets: all four quarters observed
+
+| Reset | MWPL changed |
+|---|---|
+| 31 Dec 2025 -> 1 Jan 2026 | 159 of 208 scrips |
+| 30 Mar -> 1 Apr 2026 (31 Mar was a holiday) | 153 of 205 |
+| 30 Jun -> 1 Jul 2026 | 153 of 210 |
+| 30 Sep -> 1 Oct 2026 | 158 of 213 |
+
+Overnight, on the first trading day of each quarter, and nowhere else at that scale. The data
+now supports `reset_calendar: [1, 4, 7, 10]` for every month, but `config/rules.yaml` still
+records it as an assumption until the observation is written there, sourced to these eight
+files. The 1 Oct 2025 reset itself falls just before the window and is not seen.
+
+On eight other days a single scrip's MWPL moved mid-quarter (for example 14 Nov 2025 and 13 Jan
+2026): not a reset, most likely a corporate action changing the share count. That is the kind of
+change the reference-data detector is for.
+
 ## NSE's expiry calendar is Tuesday, moved earlier for holidays
 
 Read out of the bhavcopies on 8 Nov 2026, after an assumption of last-Thursday expiry sent one

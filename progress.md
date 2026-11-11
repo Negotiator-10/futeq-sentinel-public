@@ -376,3 +376,30 @@ a missing prior state, and a new scrip near a line.
 **Next:** Wed 11 Nov, the Week 2 teach-back, and v0.1 in the Citco,
 JPMorgan and Anand Rathi applications. Thu 12 Nov, before any Week 3 code:
 how many days I will download by hand for the replay, and the scope cuts.
+
+## 11 Nov 2026 (Wed)
+
+- **Week 2 teach-back:** 5 of 7 right, 2 partly (the signed [0, 1) test, and
+  MWPL as the limit, not the exposure). Q7 closes the delta gap on the gaps list.
+- **The replay decision** (#020): every session from 1 Oct 2025, downloaded by
+  hand. The first file is already on the FutEq basis (207 of 207). Cut: the
+  live page, OTR, the index rows (SPEC 8, 9, 10, 13, 14, 16) and row 15.
+- **546 files downloaded by hand,** checked month by month and recorded in
+  `docs/data_manifest.csv`. The calendar now covers 2025 (NSE/FAOP/65588),
+  with the 2025 Muhurat session verified as chaining from its own files, and
+  15 Jan 2026 as an election holiday (NSE/FAOP/72262) - the replay found it
+  first, as a weekday with no files.
+- **The replay:** 56,997 of 56,997 scrip-days; 90 of 90 transitions; 1,130
+  in-band scrip-days all correct; 273 of 273 runner sessions COMPLETED. MWPL
+  resets observed on the first trading day of all four quarters.
+- **It found a bug of mine:** FutEq OI as a float put one whole-number headroom
+  4e-9 below NSE's. Fixed by keeping it as an exact Decimal from the parser on
+  (`ef23129`). A second trap came with it: a Decimal compared with the float
+  0.95 would have banned a scrip exactly on 95%. Both pinned by tests.
+- **And one real disagreement:** TRENT on 3 Jun 2026, one share less headroom
+  than the formula. Safe direction, cause not visible. Kept failing, on purpose.
+- **Written up** in the README and READING.md.
+
+**Next:** record the reset calendar in `config/rules.yaml` as observed, from
+the eight files either side of each reset. Then Week 3: deltas, FutEq and MWPL
+computed by me rather than read as published, and row 7.

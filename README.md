@@ -10,8 +10,8 @@ The checking is the point. Anyone can write a script that reads an exchange file
 to know was whether my reading of the regulation was right, and the only honest way to find out
 was to reproduce numbers NSE publishes independently and see where I disagreed.
 
-Status: v0.1. One command runs a trading day end to end and a second renders that day's report
-from what the run stored. "What it does not do yet", below, is the accurate summary of the rest.
+Status: v0.1, and a replay of every session since 1 Oct 2025. One command runs a trading day end
+to end and a second renders that day's report from what the run stored. "What it does not do yet", below, is the accurate summary of the rest.
 Release dates live in `PLAN.md` and I have deliberately not repeated them here — a date in two
 files is a date that goes stale in one of them, which has already happened once in this one.
 
@@ -21,65 +21,66 @@ positions. Nothing here is investment advice, and no orders are sent anywhere.
 
 ## What it reproduces, and how closely
 
-**Ban-period forecasts, scored against NSE's own published ban list.** For each trading day the
-engine takes NSE's published ban list for that day as the prior state, that day's utilisation as
-the measurement, and forecasts the next trading day's ban list. The answer is NSE's published
-list for that day.
+**A year of NSE's ban decisions, reproduced.** For every session from 1 Oct 2025 to 9 Nov 2026,
+the engine takes NSE's published ban list for that day as the prior state, that day's utilisation
+as the measurement, and forecasts the next session's list. The answer is NSE's published list for
+that session. It never reads NSE's own next-day flag, which would be the answer fed in.
 
-| | |
+| 1 Oct 2025 to 9 Nov 2026 | |
 |---|---|
-| Scrip-days agreeing, 12 Oct to 9 Nov 2026 | **3241 of 3241** |
-| False positives | 0 |
-| False negatives | 0 |
-| Ban transitions in the sample | **8** — 3 entries, 5 releases |
-| Transitions forecast correctly | 8 |
-| Scrip-days inside the 80–95% band | **101** — 27 held, 74 stayed out, all correct |
+| Sessions | 273, two of them Muhurat sessions; 272 forecasts scored (the last answer is not published yet) |
+| Scrip-days agreeing | **56,997 of 56,997** |
+| Ban transitions forecast correctly | **90 of 90**: 45 entries and 45 releases |
+| Scrip-days inside the 80–95% band | **1,130**: 342 held, 788 stayed out, all correct |
+| Ban episodes | 46, across 11 stocks; 428 banned scrip-days |
 
-**Read the last two numbers, not the first.** Almost all of those 3241 scrip-days are a security
-nowhere near either threshold staying nowhere near it, so a model answering "never banned" would
-score 99.04% on the same data. The numbers that test the logic are the **eight** days a scrip
-actually entered or left a ban, and the **101** scrip-days that closed inside the band, where the
-right answer depends only on whether the scrip was in ban the day before. A single line at 95%
-would get the 27 held ones wrong; a single line at 80% would get the 74 that stayed out wrong.
+**Read the last three rows, not the first.** Almost every scrip-day is a security nowhere near
+either line staying there, so a model answering "never banned" would score 99.25% on the same
+data. What tests the logic is the 90 days a scrip actually entered or left a ban, and the 1,130
+scrip-days that closed inside the band, where the right answer depends only on whether the scrip
+was in ban the day before. A single line at 95% would get the 342 held ones wrong; a single line
+at 80% would get the 788 that stayed out wrong.
 
 SAIL shows both in one week. It closed at 80.51% on 4 November while in ban and was held; it
-closed at 82.79% on 6 November, higher, after its release, and stayed out.
-
-The eight transitions, with the utilisation at the prior close:
-
-| Effective | Symbol | Direction | Utilisation |
-|---|---|---|---|
-| 13 Oct 2026 | KAYNES | entry | 97.98% |
-| 14 Oct 2026 | BANDHANBNK | release | 79.41% |
-| 14 Oct 2026 | LICHSGFIN | release | 78.82% |
-| 15 Oct 2026 | SAIL | entry | 95.01% |
-| 28 Oct 2026 | AMBUJACEM | release | 70.02% |
-| 28 Oct 2026 | KAYNES | release | 66.96% |
-| 29 Oct 2026 | KAYNES | entry | 95.67% |
-| 6 Nov 2026 | SAIL | release | 79.52% |
-
-Three entries all just above the 95% line, five releases all at or below 80%, and nothing in the
-fifteen points between — the hysteresis band, empty of transitions.
+closed at 82.79% on 6 November, higher, after its release, and stayed out. It was also the year's
+most-banned stock - in ban for 133 of the 273 sessions, over 10 episodes - and held the longest
+single ban, 29 sessions from 27 August to 8 October 2026.
 
 **SAIL on 15 October is the row I would put in front of anyone.** At the previous close its
-futures-equivalent open interest was 95.0135% of its MWPL: **29,360 shares** past the line on a limit of 217 million, one part in seven
-thousand. NSE banned it. Paragraph 5.2.6 of SEBI 2025/79 says a ban applies when open interest
-*exceeds* 95%, so the comparison is strictly greater and a scrip sitting exactly on 95% is not in
-ban. I wrote that down on 1 November because of one word in a circular; two weeks of real data
-put a stock 0.0135 of a percentage point from testing it.
+futures-equivalent open interest was 95.0135% of its MWPL: **29,360 shares** past the line on a
+limit of 217 million, one part in seven thousand. NSE banned it. Paragraph 5.2.6 of SEBI 2025/79
+says a ban applies when open interest *exceeds* 95%, so the comparison is strictly greater and a
+scrip sitting exactly on 95% is not in ban. I wrote that down on 1 November because of one word
+in a circular. In a year of real data, nothing came closer to testing it.
 
-**Ban-period headroom, reconciled against NSE's published column.** NSE publishes a
-`Limit for Next Day` figure per security. I derived `0.95 × MWPL − FutEq OI` by hand from
-paragraphs 5.2.3 and 5.2.6, four days before I had the file, and it matches on **216 of 216**
-rows. Against notional open interest it matches 0 of 216, which settles that NSE computes on the
+**Ban-period headroom, reconciled every session.** NSE publishes a `Limit for Next Day` figure
+per security. I derived `0.95 × MWPL − FutEq OI` by hand from paragraphs 5.2.3 and 5.2.6, four
+days before I had the file. Over the year it matches NSE's figure on **56,786 of 56,787** rows.
+Against notional open interest it matches 22, which is coincidence: NSE computes on the
 futures-equivalent basis.
 
-Exact equality matches on **zero** of 216 rows, because NSE truncates to whole shares and the
-engine keeps the decimals. The test is that the residual lies in `[0, 1)`, which is not a
-tolerance — it is the same statement as "truncating mine gives theirs", so it is an exact test of
-a truncation hypothesis. It is signed rather than absolute on purpose: NSE publishing *more*
-headroom than the formula allows is a trading risk, publishing less only costs opportunity, and
-an absolute test would not notice the difference.
+The test is that my exact figure minus NSE's lies in `[0, 1)`. That is not a tolerance - it is
+the same statement as "truncating mine gives theirs", so it is an exact test of a truncation
+hypothesis. It is signed rather than absolute on purpose: NSE publishing *more* headroom than the
+formula allows is a trading risk, publishing less only costs opportunity, and an absolute test
+would not notice the difference.
+
+**The one disagreement: TRENT, 3 June 2026.** NSE published one share *less* headroom than
+truncating the formula gives. It is in the safe direction, and its cause cannot be determined
+from the published file. I record it as a known exception and keep the check failing on it;
+widening `[0, 1)` to make it pass would throw away the one real finding. One disagreement in
+56,787 rows, named, is the result.
+
+**The replay also found a bug of mine.** On five rows the exact headroom is a whole number and NSE
+publishes exactly it. On one of them, float arithmetic put mine four billionths of a share below,
+which fails `[0, 1)` on a correct row. FutEq OI is now kept as the exact published decimal from the parser
+onwards, and a float is refused.
+
+**MWPL resets, observed in the data.** The limits change overnight on the first trading day of
+each quarter - 1 January, 1 April, 1 July and 1 October 2026 - for about three-quarters of
+scrips, and hold still in between. The circular says only "quarterly", so `config/rules.yaml`
+still marks the reset months as an assumption; recording this observation there, with the eight
+files either side of each reset as its source, is the next step.
 
 ## What it does not do yet
 
@@ -100,17 +101,19 @@ Stated plainly, because the thing above is the only claim I want read as finishe
   next-day ban determination in the same file the engine computes from, so there is no lead of
   any size. What this does is reproduce the exchange's determination independently and reconcile
   against it. That is narrower than "forecasting", and it is deliberately the word I use.
-* **Neither boundary has been tested at the boundary on real data.** 95.01% is not 95.00%, and no
-  real row has sat exactly on 95% or 80%. The inclusivity — strict at entry, inclusive at exit —
-  is tested end to end on synthetic files with made-up scrips placed exactly on each line, through
-  the same parsers, engine and runner. That is a test of my code, not evidence from NSE, and the
-  real data may never provide it.
+* **Neither boundary has been tested at the boundary on real data.** In a year, no real row sat
+  exactly on 95% or 80%. The closest to entry was SAIL, 0.0135 points over 95%; the closest
+  banned scrip to the exit was 0.14 points above 80%, and held; the closest release came from
+  0.21 points below. The inclusivity — strict at entry, inclusive at exit — is tested end to end
+  on synthetic files with made-up scrips placed exactly on each line, through the same parsers,
+  engine and runner. That is a test of my code, not evidence from NSE, and the real data may
+  never provide it.
 * **A missing prior state has only been run on synthetic files.** Every real scored day had its
   seed. The runner's handling of a missing ban list — refusing only the in-band forecasts, D-1's
   score and row 6 — is tested on the synthetic window, not on a real gap.
-* **Row 6 has never run inside a real day.** On 4 November, the one real day the runner has been
-  run on, row 6 refuses: there is no prop book and no `Contract_Delta` file for 3 or 4 November.
-  The report says "Refused", not "0 breaches".
+* **Row 6 has never run inside a real day.** The runner has run every one of the 273 sessions,
+  and on each row 6 refuses: there is no prop book and no `Contract_Delta` file. The report says
+  "Refused", not "0 breaches".
 * **Acquisition is manual, and will stay manual.** NSE's terms of use (para 9) prohibit systematic
   or automated data collection, and the main site offers no consent route, so I download every
   file by hand and record its checksum. v1.0 adds an importer that checks what I download; there
@@ -128,7 +131,7 @@ Python 3.12.
 
 ```
 pip install -e ".[dev]"
-pytest                        # 459 tests; 33 skip without NSE's files in data/
+pytest                        # 475 tests; 34 skip without NSE's files in data/
 python scripts/score_bans.py  # reproduces the full score from the files in data/
 ```
 
