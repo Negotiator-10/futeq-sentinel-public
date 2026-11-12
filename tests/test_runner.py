@@ -43,9 +43,15 @@ def isin_of(symbol: str) -> str:
     raise KeyError(symbol)
 
 
-def synthetic_paths(tmp_path, *, with_combineoi=True, calendar=None) -> RunPaths:
+WINDOW_START = dt.date(2026, 10, 12)  # the window's first day, declared as its book start
+
+
+def synthetic_paths(tmp_path, *, with_combineoi=True, calendar=None,
+                    book_start: dt.date = WINDOW_START) -> RunPaths:
     """A temporary data/: one combineoi zip per window day, plus the
-    window's ban lists copied alongside."""
+    window's ban lists copied alongside. The book start is declared in a
+    temporary book.yaml, as #016 addendum 2 planned, so the window has a
+    first day of its own rather than the project's 1 Oct 2025."""
     data = tmp_path / "data"
     data.mkdir()
     if with_combineoi:
@@ -53,11 +59,16 @@ def synthetic_paths(tmp_path, *, with_combineoi=True, calendar=None) -> RunPaths
             build_combineoi(data, day, rows)
     for ban_list in WINDOW.glob("fo_secban_*.csv"):
         shutil.copy(ban_list, data / ban_list.name)
+    book_config = tmp_path / "book.yaml"
+    book_config.write_text(
+        f"start_date: {book_start.isoformat()}\nreason: the synthetic window's book start\n",
+        encoding="utf-8")
     base = RunPaths.default()
     return RunPaths(data=data, rules=base.rules, calendar=calendar or base.calendar,
                     store=tmp_path / "sentinel.sqlite",
                     lock=tmp_path / "runner.lock",
-                    book=data / "book" / "positions.csv")
+                    book=data / "book" / "positions.csv",
+                    book_config=book_config)
 
 
 def open_store(paths):

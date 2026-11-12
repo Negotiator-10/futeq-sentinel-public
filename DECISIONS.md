@@ -1538,3 +1538,62 @@ covered, and the time goes to the replay and row 7.
 
 **Outcome.** Accepted, 12 Nov 2026. Row 7's engine and store are done the same day (8390691,
 5738320, e3bb265, 553b210); its runner and report wiring are next.
+
+## #022: Row 7 in the run's inputs and the report, 12 Nov 2026
+<!-- Authorship. The file locations, reading yesterday's MWPL from combineoi(D-1), and the
+     report's position and wording are mine, given on 12 Nov to five points Claude raised.
+     Claude built RunPaths, the checksums, the report section and the tests. -->
+
+1. **The reference tables sit beside the positions file.** `holders.csv` and `accounts.csv` are
+   `RunPaths.holders()` and `RunPaths.accounts()`, built from `book`'s folder. Not fields with
+   defaults like `book_config`: a default would point a test's RunPaths at the real `data/`
+   folder, and the test would read real files without saying so.
+
+2. **Yesterday's MWPL comes from `combineoi(D-1)`, not the store.** Row 7's reason for a
+   passive breach names its mechanism from yesterday's MWPL, and the reason is stored. Read from
+   the store, D's stored rows would depend on whether D-1 had been run, so a re-run of D could
+   change with no input changed. Read from the file, it is an input, like row 6's `delta(D-1)`.
+   A missing `combineoi(D-1)` passes None, not a refusal: only the reason gets less specific,
+   never the cause (#016 addendum B).
+
+3. **Row 7's inputs are checksummed:** `book.yaml`, `holders.csv`, `accounts.csv` and
+   `combineoi(D-1)`, beside the files already recorded. A missing one is left out, as before.
+
+4. **The report puts row 7 at section 4,** after row 6 and before tomorrow's ban, so #019 item
+   8's order becomes: refusals, flag disagreements, row 6, row 7, tomorrow's ban, watchlist,
+   checks passed, audit footer. The two breach rows sit together because both are about the
+   book, not the market.
+
+5. **Row 7 has three states in the report, never merged.**
+   * Refused as a whole stage: "Refused:" and the reason.
+   * Checked: the breaches, with limit, gross FutEq, excess and cause, and the count; or
+     "None: N check(s), every one permitted." A scrip refused for want of an MWPL is listed
+     with the refusal's reason and the holders `row7_not_checked` names.
+   * Nothing stored and no refusal: "Nothing checked, and no refusal recorded: either the book
+     held nothing that day, or this run predates row 7." Every run before row 7 looks like
+     this, and so does a flat day, so the report says both rather than "0 breaches".
+
+- **Open:** whether row 7 should record that it ran, so that a flat day and a run from before
+  row 7 stop looking the same (follow-up 4a). Until then, state 5's third case stays two-way.
+- **Outcome:** accepted, 12 Nov 2026. Plumbing and report built; the runner's row 7 stage is
+  mine, against the tests in `tests/test_runner_row7.py`. The sample reports are re-rendered
+  once the stage is committed, so their footer names a clean commit.
+
+- **Correction to #019 item 11, found 12 Nov 2026 while answering follow-up 4b.** Item 11 says
+  "a changed input refuses, naming the file and both checksums". The code does not do that.
+  `start_run()` records the input checksums and never compares them with an earlier run's; the
+  re-run rule is enforced on results, in `_insert_results()`: an identical row is a no-op, a
+  different row is a `StoreError` naming the table and the rows, and a new row is inserted. Two
+  consequences:
+  * A changed input whose results do not change passes silently, and one whose results do
+    change fails naming the table, not the file.
+  * **A re-run that moves a stage from refused to computed leaves both on the day.** The first
+    run stores a whole-stage refusal; the second, with the missing file now present, writes the
+    stage's rows and no refusal. Nothing removes the old refusal row, and `record_row7()`'s
+    cross-table guard compares only `row7_check` and `row7_not_checked`, not `refusal`. So the
+    day says both "refused" and "checked". Row 6 has the same hole today.
+
+  Nothing is fixed now. No real day can hit it yet, because `data/book/` does not exist, and the
+  replay re-run is held until it does. The fix belongs with v1.0's supersede (item 11's
+  "supersede and the stale-day cascade"), recorded in `TASKS.md` under Week 5. Until then, a
+  day that moved from refused to computed is re-run into a fresh store.

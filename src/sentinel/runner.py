@@ -26,14 +26,22 @@ import datetime as dt
 import hashlib
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
-from sentinel.book import DEFAULT_BOOK_CONFIG_PATH, load_books, load_delta_factors
+from sentinel.book import (
+    DEFAULT_BOOK_CONFIG_PATH, NoPriorDay, load_book_start, load_books, load_delta_factors,
+)
 from sentinel.calendar import (
     ChainUnverifiedError, DayKind, UnknownDateError, load_calendar,
 )
-from sentinel.engine import check_ban_period_reduction, is_in_ban, reconcile
+from sentinel.engine import (
+    NO_MWPL_REASON, EntityLimitResult, check_ban_period_reduction, check_entity_limit,
+    is_in_ban, reconcile,
+)
+from sentinel.entities import ReferenceDataError, load_reference
 from sentinel.parsers import parse_ban_list, parse_mwpl_file
 from sentinel.rules import load_rules
 from sentinel.runlock import RunInProgressError, RunLock
@@ -91,11 +99,118 @@ class RunPaths:
     def delta(self, day: dt.date) -> Path:
         return self.data / f"Contract_Delta_{_stamp(day)}.csv"
 
+    # Row 7's reference tables (#016 addendum A) sit beside the positions file. Built from
+    # `book`'s folder rather than given defaults like `book_config`: a default would point a
+    # test's RunPaths at the real data/ folder, and the test would read real files unawares.
+    def holders(self) -> Path:
+        return self.book.parent / "holders.csv"
+
+    def accounts(self) -> Path:
+        return self.book.parent / "accounts.csv"
+
 
 # ---------------------------------------------------------------- outcomes
 
 class RunRefused(Exception):
     """The whole run cannot proceed. Carries the reason for the run log."""
+
+
+class Row7Status(Enum):
+    """What the row 7 stage reached. "Not run" is not a status: it is DayResults.row7 being None."""
+
+    CHECKED = "checked"    # the result holds checks and/or not-checked entries
+    FLAT = "flat"          # today's book is PropBook.flat(): verified that nothing was held
+    REFUSED = "refused"    # the whole stage refused; there is no result
+
+
+@dataclass(frozen=True)
+class Row7Outcome:
+    """The row 7 stage's outcome for one day, carrying its own refusals.
+
+    write_day() reads everything it needs from this one value: whether to call record_row7(),
+    which refusals to store, and (#023) which stage_ran marker to write. It carries its date
+    because a FLAT outcome has nothing else in it that says which day it is for (#015).
+    """
+
+    trade_date: dt.date
+    status: Row7Status
+    result: EntityLimitResult | None
+    refusals: tuple[Refusal, ...] = ()
+
+    def __post_init__(self) -> None:
+        day = self.trade_date
+        where = f"row 7 outcome for {day} ({getattr(self.status, 'value', self.status)})"
+
+        # 1. Types. A list inside a frozen dataclass could still be changed.
+        if not isinstance(self.status, Row7Status):
+            raise TypeError(f"{where}: status must be a Row7Status, not {type(self.status).__name__}")
+        if not isinstance(self.refusals, tuple):
+            raise TypeError(f"{where}: refusals must be a tuple, not {type(self.refusals).__name__}")
+        for r in self.refusals:
+            if not isinstance(r, Refusal):
+                raise TypeError(f"{where}: refusals holds a {type(r).__name__}, not a Refusal")
+        if self.result is not None and not isinstance(self.result, EntityLimitResult):
+            raise TypeError(
+                f"{where}: result must be an EntityLimitResult or None, "
+                f"not {type(self.result).__name__}")
+
+        # 2. Every refusal belongs to row 7 and to this day.
+        for r in self.refusals:
+            if r.stage is not RefusalStage.ROW7:
+                raise ValueError(f"{where}: a {r.stage.value} refusal does not belong to row 7")
+            if r.trade_date != day:
+                raise ValueError(f"{where}: a refusal is dated {r.trade_date}")
+
+        # 3. Every entry is for this day. EntityLimitResult already refuses a mix of dates,
+        #    so whatever single date it holds must be this one.
+        if self.result is not None:
+            dates = {e.trade_date for e in (*self.result.checks, *self.result.not_checked)}
+            if dates - {day}:
+                raise ValueError(f"{where}: the result is for {sorted(dates)}")
+
+        whole_stage = [r for r in self.refusals if r.subject == ""]
+
+        # 4. REFUSED: exactly one whole-stage refusal, and no result.
+        if self.status is Row7Status.REFUSED:
+            if self.result is not None:
+                raise ValueError(f"{where}: a refused stage has no result")
+            if len(self.refusals) != 1 or len(whole_stage) != 1:
+                raise ValueError(
+                    f"{where}: needs exactly one whole-stage refusal (subject \"\"), "
+                    f"got {len(self.refusals)} refusal(s), {len(whole_stage)} whole-stage")
+
+        # 5. FLAT: an empty result and no refusals. Nothing was held, so nothing was refused.
+        elif self.status is Row7Status.FLAT:
+            if self.result is None:
+                raise ValueError(f"{where}: a flat day still has a result, an empty one")
+            if self.result.checks or self.result.not_checked:
+                raise ValueError(
+                    f"{where}: a flat day has {len(self.result.checks)} check(s) and "
+                    f"{len(self.result.not_checked)} not-checked; it must have none")
+            if self.refusals:
+                raise ValueError(f"{where}: a flat day has {len(self.refusals)} refusal(s)")
+
+        # 6. CHECKED: a non-empty result, and one refusal per no-MWPL scrip, both directions.
+        else:
+            if self.result is None:
+                raise ValueError(f"{where}: a checked stage needs its result")
+            if not self.result.checks and not self.result.not_checked:
+                raise ValueError(
+                    f"{where}: the result is empty; an empty result is FLAT, and only a "
+                    f"flat book can give one")
+            if whole_stage:
+                raise ValueError(f"{where}: a checked stage cannot carry a whole-stage refusal")
+            subjects = [r.subject for r in self.refusals]
+            if len(set(subjects)) != len(subjects):
+                raise ValueError(f"{where}: one refusal per scrip; got duplicates in {sorted(subjects)}")
+            not_checked_isins = {nc.isin for nc in self.result.not_checked}
+            no_refusal = not_checked_isins - set(subjects)
+            no_entries = set(subjects) - not_checked_isins
+            if no_refusal or no_entries:
+                raise ValueError(
+                    f"{where}: refusals and not-checked scrips must match. "
+                    f"Not checked but not refused: {sorted(no_refusal)}. "
+                    f"Refused but nothing not checked: {sorted(no_entries)}.")
 
 
 @dataclass
@@ -110,6 +225,7 @@ class DayResults:
     forecasts: dict[str, tuple[str, bool]] = field(default_factory=dict)
     row6_checks: tuple = ()
     refusals: list[Refusal] = field(default_factory=list)
+    row7: Row7Outcome | None = None                        # None = not run
 
 
 # ---------------------------------------------------------------- audit inputs
@@ -141,10 +257,14 @@ def input_checksums(paths: RunPaths, day: dt.date,
                     prev: dt.date | None) -> dict[str, str]:
     """Checksums of every input the run could read that exists. A missing file
     is left out, not recorded as None: in the run log a NULL means nothing
-    (#019 item 5). Yesterday's delta file counts, because row 6 reads it."""
-    files = [paths.combineoi(day), paths.ban_list(day), paths.delta(day), paths.book]
+    (#019 item 5). Yesterday's delta file counts, because row 6 reads it.
+    Yesterday's combineoi counts, because row 7 reads its MWPL to name a
+    passive breach's mechanism in the stored reason. Row 7 also reads the
+    declared book start and the two reference tables."""
+    files = [paths.combineoi(day), paths.ban_list(day), paths.delta(day), paths.book,
+             paths.holders(), paths.accounts(), paths.book_config]
     if prev is not None:
-        files.append(paths.delta(prev))
+        files += [paths.combineoi(prev), paths.delta(prev)]
     return {f.name: _sha256(f) for f in files if f.exists()}
 
 
@@ -244,6 +364,9 @@ def compute_day(paths: RunPaths, day: dt.date, calendar, rules) -> DayResults:
     # 5. Row 6.
     results.row6_checks = _row6(paths, day, calendar, rules, official_banned,
                                 symbol_for_isin, results.refusals)
+
+    # 6. Row 7.
+    results.row7 = _entity_limit_stage(paths, day, calendar, rules, rows, symbol_for_isin)
     return results
 
 
@@ -284,12 +407,117 @@ def _row6(paths, day, calendar, rules, official_banned,
     )
 
 
+FIRST_DAY_REASON = "first day of the book"
+
+
+def _entity_limit_stage(paths, day, calendar, rules, rows, symbol_for_isin) -> Row7Outcome:
+    """Run the row 7 check, or say why it can't (#016 addendum 2). Never raises for a gap.
+
+    Only ReferenceDataError is caught, at its two failure points, each with its own reason.
+    Anything else is a real failure and ends the run FAILED. A gap returns REFUSED with one
+    whole-stage refusal; a flat book returns FLAT; otherwise CHECKED, with one refusal per
+    scrip that had no MWPL.
+    """
+    def refuse(reason: str) -> Row7Outcome:
+        return Row7Outcome(day, Row7Status.REFUSED, None,
+                           (Refusal(day, RefusalStage.ROW7, "", reason),))
+
+    # 1. The declared start decides whether there is a yesterday (addendum 2, point 2).
+    #    A malformed book.yaml raises BookError: a config fault, so the run fails loudly.
+    start = load_book_start(paths.book_config, calendar=calendar).start_date
+    if day < start:
+        return refuse("before the book's start date")
+
+    # 2. Files first: load_reference() would raise FileNotFoundError, which is not caught.
+    missing = [p.name for p in (paths.book, paths.holders(), paths.accounts(), paths.delta(day))
+               if not p.exists()]
+    if missing:
+        return refuse("missing: " + ", ".join(missing))
+
+    # 3. Today's book, and yesterday's unless D is the declared start.
+    prev = None
+    if day > start:
+        try:
+            prev = calendar.previous_trading_day(day)
+        except CALENDAR_ERRORS as err:
+            return refuse(f"previous trading day unsettled: {err}")
+
+    books = load_books(paths.book)
+    absent = [str(d) for d in (prev, day) if d is not None and d not in books]
+    if absent:
+        # Never books.get(): a missing day must not pass as flat (#015).
+        return refuse("no prop book for " + ", ".join(absent))
+    today = books[day]
+    yesterday = books[prev] if prev is not None else NoPriorDay(day, FIRST_DAY_REASON)
+
+    # 4. Reference data. as_of() raises too, when the two tables disagree with each other:
+    #    that is the data failing to load, not a position, so it carries the load reason.
+    try:
+        reference = load_reference(paths.holders(), paths.accounts())
+        snapshot = reference.as_of(day)
+    except ReferenceDataError as err:
+        return refuse(f"reference data could not be loaded: {err}")
+
+    # 5. MWPL. Yesterday's, read from combineoi(D-1) so the stored reason depends only on
+    #    input files (#022). Missing, it is None: the reason gets vaguer, the cause does not.
+    mwpl_today = {r.isin: r.mwpl for r in rows}
+    mwpl_yesterday = None
+    if prev is not None and paths.combineoi(prev).exists():
+        mwpl_yesterday = {r.isin: r.mwpl for r in parse_mwpl_file(paths.combineoi(prev))}
+
+    # 6. The check. Factors load first, outside the try: its only ReferenceDataError
+    #    must be a position in an unknown account, so the reason stays honest.
+    factors_today = load_delta_factors(paths.delta(day))
+    try:
+        result = check_entity_limit(
+            today=today,
+            yesterday=yesterday,
+            factors_today=factors_today,
+            reference=snapshot,
+            mwpl_today=mwpl_today,
+            mwpl_yesterday=mwpl_yesterday,
+            symbol_for_isin=symbol_for_isin,
+            calendar=calendar,
+            rules=rules,
+        )
+    except ReferenceDataError as err:
+        return refuse(f"position in unknown account: {err}")
+
+    # 7. FLAT comes from the book, never from an empty result. Every position yields a check
+    #    or a NotChecked, so a mismatch either way is a bug: raise, and the run ends FAILED.
+    empty = not result.checks and not result.not_checked
+    if today.is_flat:
+        if not empty:
+            raise RuntimeError(f"{day}: a flat book gave row 7 entries")
+        return Row7Outcome(day, Row7Status.FLAT, result)
+    if empty:
+        raise RuntimeError(f"{day}: a book with positions gave row 7 no checks and no "
+                           f"not-checked entries")
+
+    # 8. One refusal per scrip with no MWPL, with the count (addendum 2, point 1). The
+    #    holders it affected stay in row7_not_checked, beside the checks. Any other
+    #    not-checked reason is one this stage has no wording for: fail, don't mislabel it.
+    unknown = sorted({nc.reason for nc in result.not_checked} - {NO_MWPL_REASON})
+    if unknown:
+        raise RuntimeError(f"{day}: row 7 has no refusal wording for not-checked "
+                           f"reason(s) {unknown}")
+    per_scrip = Counter(nc.isin for nc in result.not_checked)
+    refusals = tuple(
+        Refusal(day, RefusalStage.ROW7, isin,
+                f"no MWPL in today's combineoi; {n} check{'' if n == 1 else 's'} not made")
+        for isin, n in sorted(per_scrip.items()))
+    return Row7Outcome(day, Row7Status.CHECKED, result, refusals)
+
+
 # ---------------------------------------------------------------- writing the day
 
 def write_day(store: BanStateStore, day: dt.date, run_id: str,
               results: DayResults) -> None:
     """Write D's results in one transaction. A writer is called only when it
     has something: an empty write raises by design (#019 decision 5)."""
+    row7 = results.row7
+    refusals = [*results.refusals, *(row7.refusals if row7 is not None else ())]
+
     with store.day_transaction(day, run_id):
         store.record_measurements(results.measurements,
                                   input_sha256=results.combineoi_sha256)
@@ -303,8 +531,11 @@ def write_day(store: BanStateStore, day: dt.date, run_id: str,
                                   input_sha256=results.combineoi_sha256)
         if results.row6_checks:
             store.record_row6_checks(results.row6_checks)
-        if results.refusals:
-            store.record_refusals(results.refusals)
+        # Only CHECKED has a non-empty result; FLAT's is empty and record_row7() refuses it.
+        if row7 is not None and row7.status is Row7Status.CHECKED:
+            store.record_row7(row7.result)
+        if refusals:
+            store.record_refusals(refusals)
 
 
 # ---------------------------------------------------------------- the run

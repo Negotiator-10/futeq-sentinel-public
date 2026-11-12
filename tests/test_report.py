@@ -33,7 +33,8 @@ from tests.test_runner import (
 )
 
 SECTIONS = ["## 1. Refusals", "## 2. Flag disagreements with NSE", "## 3. Row 6 breaches",
-            "## 4. Tomorrow's ban", "## 5. Watchlist: the 80-95% band", "## 6. Checks passed",
+            "## 4. Row 7: entity limits", "## 5. Tomorrow's ban",
+            "## 6. Watchlist: the 80-95% band", "## 7. Checks passed",
             "### Audit"]
 
 
@@ -113,7 +114,7 @@ def test_a_missing_ban_list_shows_in_refusals_and_tomorrow(tmp_path, stand_ins):
     text = report.render(NO_LIST, ran(tmp_path, NO_LIST))
     assert "**official_state** refused" in text and "**score** refused" in text
     assert "**forecast** refused for 5 scrip(s): EDGECO, ENTRYCO, FREECO, RELEASECO, STICKYCO" in text
-    tomorrow = text.split("## 4. Tomorrow's ban")[1].split("## 5.")[0]
+    tomorrow = text.split("## 5. Tomorrow's ban")[1].split("## 6.")[0]
     assert "Not forecast: EDGECO, ENTRYCO, FREECO, RELEASECO, STICKYCO" in tomorrow
     assert "5 not compared" in text        # a refused forecast is not an agreement
 
@@ -134,7 +135,7 @@ def test_an_unverified_next_day_refuses_flags_and_tomorrow(tmp_path, stand_ins):
 
     out = report.render(FRI_6_NOV, paths)
     flags = out.split("## 2.")[1].split("## 3.")[0]
-    tomorrow = out.split("## 4.")[1].split("## 5.")[0]
+    tomorrow = out.split("## 5.")[1].split("## 6.")[0]
     assert "Refused: nothing to compare" in flags
     assert "Refused:" in tomorrow
     assert stand_ins["flags"] == 0                  # never asked to compare against nothing

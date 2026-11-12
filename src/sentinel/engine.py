@@ -521,6 +521,12 @@ class EntityLimitCheck:
             raise ValueError(f"{where}: no reason.")
 
 
+# The one reason check_entity_limit() gives a NotChecked today. The runner groups not-checked
+# entries into per-scrip refusals on this reason alone, so a new reason must be handled there
+# before the engine may give it.
+NO_MWPL_REASON = "no MWPL for this scrip in today's combineoi"
+
+
 @dataclass(frozen=True)
 class NotChecked:
     """A check that could not be made, and why - for example, no MWPL for the scrip today."""
@@ -677,8 +683,7 @@ def check_entity_limit(
             if isin not in mwpl_today:
                 # Answer 3: no MWPL means no limit; say so, don't drop it.
                 not_checked.append(NotChecked(
-                    trade_date, holder_id, isin, limit_key,
-                    "no MWPL for this scrip in today's combineoi"))
+                    trade_date, holder_id, isin, limit_key, NO_MWPL_REASON))
                 continue
 
             mwpl = mwpl_today[isin]

@@ -172,6 +172,10 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
 - [ ] Week 3 (Thu 12 to Wed 18 Nov): limit engine, data quality, circular watcher
 - [ ] Week 4 (Thu 19 to Wed 25 Nov): validation against NSE, entity limits, alerts
 - [ ] Week 5 (Thu 26 Nov to Wed 2 Dec): OTR, reports, live page, **v1.0**
+  - [ ] **Supersede, for re-runs** (`DECISIONS.md` #022 correction). Two gaps found 12 Nov: a
+    changed input is not refused as #019 item 11 says, because only results are compared; and a
+    re-run that moves row 6 or row 7 from refused to computed leaves both on the day. The
+    replay re-run waits for this or a fresh store, and for `data/book/`
 - [ ] Week 6 (Thu 3 to Wed 9 Dec): buffer and the 7 Dec format cutover
 
 ### D5 — brought forward to Mon 2 Nov

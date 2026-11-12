@@ -11,13 +11,15 @@ Sections, in #019's order:
     1. Refusals            every refusal record for D, by stage
     2. Flag disagreements  NSE's T+1 flag on D's rows against the run's forecast for D+1
     3. Row 6 breaches      accounts that increased FutEq delta in a banned scrip
-    4. Tomorrow's ban      the forecast for the next trading day
-    5. Watchlist           the 80-95% band, with distance to the line that applies (item 9)
-    6. Checks passed       reconciliation: the residual count, not the range (item 10)
+    4. Row 7               entity limits: breaches with cause and excess, scrips not checked
+                           and the holders they affected (added 12 Nov 2026, #022)
+    5. Tomorrow's ban      the forecast for the next trading day
+    6. Watchlist           the 80-95% band, with distance to the line that applies (item 9)
+    7. Checks passed       reconciliation: the residual count, not the range (item 10)
        Audit footer        the run log: code, checksums, rules status, inputs, times
 
 A refused section says "Refused:" and why. It is never left out and never shown as zero: row 6
-refused for want of a book is not "0 breaches".
+or row 7 refused for want of a book is not "0 breaches".
 
 Usage:  python -m sentinel.report 2026-11-04        writes reports/2026-11-04.md
 Exit codes: 0 written, 2 refused (D not run, or its run did not complete), 1 error.
@@ -35,7 +37,7 @@ from enum import Enum
 from pathlib import Path
 
 from sentinel.calendar import ChainUnverifiedError, UnknownDateError, load_calendar
-from sentinel.engine import headroom_shares, utilisation
+from sentinel.engine import EntityLimitResult, headroom_shares, utilisation
 from sentinel.parsers import MwplRow
 from sentinel.rules import Rules, load_rules
 from sentinel.runner import REPO_ROOT, RunPaths
@@ -278,6 +280,7 @@ def render(day: dt.date, paths: RunPaths | None = None) -> str:
         lines += _refusals(refusals, symbol_of)
         lines += _flags(rows, forecasts, refusals)
         lines += _row6(store.row6_checks(day), refusals, symbol_of)
+        lines += _row7(store.row7_result(day), refusals, symbol_of)
         lines += _tomorrow(next_day, forecasts, refusals, symbol_of)
         lines += _watch(rows, official, rules)
         lines += _checks(store.reconciliation(day))
@@ -345,8 +348,59 @@ def _row6(checks, refusals, symbol_of) -> list[str]:
     return out + ["", f"{len(breaches)} of {len(checks)} check(s) breached.", ""]
 
 
+def _qty(d: Decimal) -> str:
+    """A Decimal as the engine writes it in its reasons: no exponent, no trailing zeros."""
+    return f"{d.normalize():f}"
+
+
+def _row7(result: EntityLimitResult, refusals, symbol_of) -> list[str]:
+    """Entity limits (SPEC row 7). Three states, never merged: refused, checked, and nothing
+    stored. The last is a flat book or a run from before row 7 existed, and the store cannot
+    yet tell which (#016 addendum 2, follow-up 4a), so the report says both."""
+    out = ["## 4. Row 7: entity limits", ""]
+    stage = _whole_stage(refusals, RefusalStage.ROW7)
+    if stage is not None:
+        return out + [f"Refused: {stage.reason}.", ""]
+    per_scrip = {r.subject: r.reason for r in refusals
+                 if r.stage is RefusalStage.ROW7 and r.subject != ""}
+    checks, not_checked = result.checks, result.not_checked
+    if not checks and not not_checked and not per_scrip:
+        return out + ["Nothing checked, and no refusal recorded: either the book held nothing "
+                      "that day, or this run predates row 7.", ""]
+
+    breaches = result.breaches
+    if breaches:
+        out += [f"**{len(breaches)} breach(es).**", "",
+                "| holder | scrip | limit | gross FutEq | limit (shares) | excess | cause | reason |",
+                "|---|---|---|---|---|---|---|---|"]
+        out += [f"| {c.holder_id} | {symbol_of.get(c.isin, c.isin)} | "
+                f"{c.limit_key.rsplit('.', 1)[-1]} | {_qty(c.gross_futeq)} | "
+                f"{_qty(c.limit_shares)} | {_qty(c.excess_shares)} | {c.cause.value} | "
+                f"{c.reason} |" for c in breaches]
+        out += ["", f"{len(breaches)} of {len(checks)} check(s) breached."]
+    elif checks:
+        out.append(f"None: {len(checks)} check(s), every one permitted.")
+    else:
+        out.append("No check could be made.")
+
+    # A scrip refused for want of an MWPL: the refusal says why, row 7's table says who.
+    affected: dict[str, list[str]] = {}
+    for n in not_checked:
+        affected.setdefault(n.isin, []).append(
+            f"{n.holder_id} ({n.limit_key.rsplit('.', 1)[-1]})")
+    isins = sorted(set(affected) | set(per_scrip), key=lambda i: symbol_of.get(i, i))
+    if isins:
+        out += ["", "Not checked:", ""]
+        for isin in isins:
+            why = per_scrip.get(isin) or "; ".join(
+                sorted({n.reason for n in not_checked if n.isin == isin}))
+            who = ", ".join(sorted(affected.get(isin, []))) or "no holder recorded"
+            out.append(f"- {symbol_of.get(isin, isin)}: {why}. Holders: {who}.")
+    return out + [""]
+
+
 def _tomorrow(next_day, forecasts, refusals, symbol_of) -> list[str]:
-    out = ["## 4. Tomorrow's ban", ""]
+    out = ["## 5. Tomorrow's ban", ""]
     stage = _whole_stage(refusals, RefusalStage.FORECAST)
     if stage is not None or next_day is None:
         why = stage.reason if stage is not None else "the next trading day is not settled"
@@ -362,7 +416,7 @@ def _tomorrow(next_day, forecasts, refusals, symbol_of) -> list[str]:
 
 
 def _watch(rows, official, rules) -> list[str]:
-    out = ["## 5. Watchlist: the 80-95% band", ""]
+    out = ["## 6. Watchlist: the 80-95% band", ""]
     entries = watchlist(rows, official, rules)
     if not entries:
         return out + ["No scrip in the band.", ""]
@@ -392,7 +446,7 @@ def _distance(e: WatchEntry) -> str:
 
 
 def _checks(rec) -> list[str]:
-    out = ["## 6. Checks passed", ""]
+    out = ["## 7. Checks passed", ""]
     if rec is None:
         return out + ["Refused: no reconciliation was stored for this date.", ""]
     head = "Reconciliation against NSE's published headroom: "
