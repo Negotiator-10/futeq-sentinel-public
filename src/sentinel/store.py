@@ -169,6 +169,7 @@ class RefusalStage(Enum):
     SCORE = "score"
     RECONCILIATION = "reconciliation"
     ROW6 = "row6"
+    ROW7 = "row7"            # entity limits (#016); added 12 Nov 2026
 
 
 @dataclass(frozen=True)
@@ -332,7 +333,8 @@ CREATE TABLE IF NOT EXISTS row6_check (
 CREATE TABLE IF NOT EXISTS refusal (
     trade_date  TEXT    NOT NULL,
     stage       TEXT    NOT NULL
-                CHECK (stage IN ('official_state','forecast','score','reconciliation','row6')),
+                CHECK (stage IN ('official_state','forecast','score','reconciliation','row6',
+                                 'row7')),
     subject     TEXT    NOT NULL,                  -- an ISIN, or '' for the whole stage
     reason      TEXT    NOT NULL CHECK (length(reason) > 0),
     run_id      TEXT    NOT NULL REFERENCES run_log (run_id),
@@ -360,7 +362,11 @@ class BanStateStore:
         """A store created before 11 Nov 2026 keeps `measurement.futeq_oi` as REAL, because the
         schema is CREATE TABLE IF NOT EXISTS. SQLite's REAL affinity would then turn the exact
         text written now back into a float, silently - the bug the Decimal change fixed. So such a
-        store is refused, and rebuilt by re-running its days, rather than opened."""
+        store is refused, and rebuilt by re-running its days, rather than opened.
+
+        For the same reason a store created before 12 Nov 2026 has a `refusal` CHECK that does not
+        list 'row7', and the first row 7 refusal would fail inside the day transaction, rolling
+        the whole day back. It is refused at open instead, with the same remedy."""
         declared = {r["name"]: r["type"].upper()
                     for r in self._conn.execute("PRAGMA table_info(measurement)")}
         if declared.get("futeq_oi") != "TEXT":
@@ -369,6 +375,17 @@ class BanStateStore:
                 f"{self.path}: measurement.futeq_oi is {declared.get('futeq_oi')!r}, not TEXT. "
                 f"This store predates exact FutEq OI (11 Nov 2026), and SQLite would round every "
                 f"new figure back to a float. Move it aside and re-run its days to rebuild it."
+            )
+        refusal_sql = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'refusal'"
+        ).fetchone()["sql"]
+        missing = [s.value for s in RefusalStage if f"'{s.value}'" not in refusal_sql]
+        if missing:
+            self._conn.close()
+            raise StoreError(
+                f"{self.path}: the refusal table does not accept stage(s) {', '.join(missing)}. "
+                f"This store predates them, so their first refusal would roll back the whole day. "
+                f"Move it aside and re-run its days to rebuild it."
             )
 
     # -- transactions -----------------------------------------------------------------------

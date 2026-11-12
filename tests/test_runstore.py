@@ -254,6 +254,31 @@ def test_a_store_from_before_exact_futeq_oi_is_refused(tmp_path):
         BanStateStore(old, load_calendar())
 
 
+def test_a_store_whose_refusal_table_predates_row7_is_refused(tmp_path):
+    """The stage CHECK is fixed when the table is first made, so an old store would accept the
+    open and then fail on the first row 7 refusal, mid-transaction. Refused at open instead."""
+    old = tmp_path / "old.sqlite"
+    BanStateStore(old, load_calendar()).close()
+    con = sqlite3.connect(old)
+    con.executescript(
+        "DROP TABLE refusal;"
+        "CREATE TABLE refusal (trade_date TEXT NOT NULL, stage TEXT NOT NULL CHECK (stage IN"
+        " ('official_state','forecast','score','reconciliation','row6')), subject TEXT NOT NULL,"
+        " reason TEXT NOT NULL, run_id TEXT NOT NULL, written_at TEXT NOT NULL,"
+        " PRIMARY KEY (trade_date, stage, subject)) WITHOUT ROWID;")
+    con.close()
+    with pytest.raises(StoreError, match="does not accept stage.*row7"):
+        BanStateStore(old, load_calendar())
+
+
+def test_a_row7_refusal_is_stored(store, lock):
+    run = start(store, lock)
+    refusal = Refusal(WED4, RefusalStage.ROW7, "", "position in unknown account TMA/GHOST")
+    with store.day_transaction(WED4, run.run_id):
+        store.record_refusals([refusal])
+    assert refusal in store.refusals(WED4)
+
+
 def test_futeq_oi_reads_back_exactly_as_written(store, lock, rules):
     """Digits a float cannot hold survive the round trip, because the column is TEXT."""
     exact = Decimal("161020000.618356012345")
