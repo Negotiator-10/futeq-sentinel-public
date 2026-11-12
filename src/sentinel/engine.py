@@ -13,6 +13,7 @@ survive SEBI changing a number.
 from __future__ import annotations
 
 import datetime as dt
+from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -575,6 +576,23 @@ class EntityLimitResult:
         return tuple(c for c in self.checks if not c.permitted)
 
 
+def _gross(book, accounts, isin, factors, symbol_for_isin, live_day=None) -> Decimal:
+    """G: net FutEq within each account, absolute value, summed across accounts
+    (#016 decision 2). With live_day, contracts expired before it are dropped,
+    so yesterday's holdings can be valued at today's factors."""
+    total = Decimal(0)
+    for tm, ucc in accounts:
+        positions = book.for_account(tm, ucc, isin)
+        if live_day is not None:
+            positions = live_on(positions, live_day)
+        total += abs(futeq_delta(positions, factors, symbol_for_isin))
+    return total
+
+
+def _account_keys(accounts) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((a.tm, a.ucc) for a in accounts))
+
+
 def check_entity_limit(
     today: PropBook,
     yesterday: PropBook | NoPriorDay,
@@ -583,6 +601,7 @@ def check_entity_limit(
     mwpl_today: Mapping[str, int],
     mwpl_yesterday: Mapping[str, int] | None,
     symbol_for_isin: Mapping[str, str],
+    calendar: TradingCalendar,
     rules: Rules,
 ) -> EntityLimitResult:
     """Every holder's and trading member's gross FutEq, per scrip, against its limit (SPEC row 7).
@@ -600,5 +619,114 @@ def check_entity_limit(
     - A scrip with no MWPL today: its checks are NotChecked, with the reason; the rest run.
     - The cause on a breach: ACTIVE, PASSIVE, or UNKNOWN when yesterday is NoPriorDay (addendum B).
       `mwpl_yesterday` only names which passive mechanism it was.
+    - Yesterday must be the previous trading day, by the calendar, as row 6 requires: a stale
+      book would leave the verdict right and the cause silently wrong. A NoPriorDay must be for
+      today's date, and the reference snapshot must be for today too.
     """
-    raise NotImplementedError("mine to write")
+    trade_date = today.trade_date
+
+    if factors_today.trade_date != trade_date:
+        raise BookError(
+            f"today's book is {trade_date} but the factors are {factors_today.trade_date}")
+
+    # A snapshot for another day could attribute accounts to the wrong holders.
+    if reference.day != trade_date:
+        raise BookError(
+            f"today's book is {trade_date} but the reference snapshot is for {reference.day}")
+
+    if isinstance(yesterday, NoPriorDay):
+        # It records the day it stands in for.
+        if yesterday.trade_date != trade_date:
+            raise BookError(
+                f"NoPriorDay is for {yesterday.trade_date}, not {trade_date}")
+    else:
+        # A stale book would leave the verdict right and the cause silently wrong.
+        expected = calendar.previous_trading_day(trade_date)
+        if yesterday.trade_date != expected:
+            raise BookError(
+                f"yesterday's book is {yesterday.trade_date}, but the previous "
+                f"trading day before {trade_date} is {expected}")
+
+    # Answer 2: every position must sit in a known account. account() raises
+    # ReferenceDataError on an unknown one, which refuses the whole stage: an
+    # unattributed position could belong to any holder.
+    held: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for p in today:
+        reference.account(p.tm, p.ucc)
+        held[(p.tm, p.ucc)].add(p.isin)
+
+    # Each aggregate is (holder_id, limit_key, accounts).
+    aggregates = []
+    for holder in reference.holders:
+        if holder.category is Category.TM_PROPRIETARY:
+            continue        # a TM's own limit IS its 20%; the TM loop produces it
+        aggregates.append((holder.holder_id, holder.category.limit_key,
+                           _account_keys(reference.accounts_of(holder.holder_id))))
+    for tm in reference.trading_members:
+        aggregates.append((tm, Category.TM_PROPRIETARY.limit_key,
+                           _account_keys(reference.proprietary_accounts_of(tm))))
+        aggregates.append((tm, TM_COMBINED_LIMIT_KEY,
+                           _account_keys(reference.combined_accounts_of(tm))))
+
+    checks, not_checked = [], []
+
+    for holder_id, limit_key, accounts in aggregates:
+        # Answer 1: only scrips this aggregate holds today.
+        isins = sorted({isin for a in accounts for isin in held.get(a, ())})
+        for isin in isins:
+            if isin not in mwpl_today:
+                # Answer 3: no MWPL means no limit; say so, don't drop it.
+                not_checked.append(NotChecked(
+                    trade_date, holder_id, isin, limit_key,
+                    "no MWPL for this scrip in today's combineoi"))
+                continue
+
+            mwpl = mwpl_today[isin]
+            g_today = _gross(today, accounts, isin, factors_today, symbol_for_isin)
+            limit_shares = Decimal(str(rules.value(limit_key))) * mwpl
+            breached = rules.compare(limit_key, g_today / mwpl)   # ">": at the limit is permitted
+            excess = g_today - limit_shares if breached else Decimal(0)
+
+            if not breached:
+                cause = None
+                reason = f"within limit: {_fmt(g_today)} of {_fmt(limit_shares)} shares"
+            elif isinstance(yesterday, NoPriorDay):
+                cause = LimitCause.UNKNOWN
+                reason = (f"over by {_fmt(excess)} shares; cause unknown: "
+                          f"{yesterday.reason}")
+            else:
+                # Both sides at TODAY's factors, so factor drift cancels and only
+                # the change in holdings remains (#016 addendum B).
+                baseline = _gross(yesterday, accounts, isin, factors_today,
+                                  symbol_for_isin, live_day=trade_date)
+                if g_today > baseline:
+                    cause = LimitCause.ACTIVE
+                    reason = (f"over by {_fmt(excess)} shares; holdings added "
+                              f"{_fmt(g_today - baseline)} to the gross position")
+                else:
+                    cause = LimitCause.PASSIVE
+                    reason = (f"over by {_fmt(excess)} shares; no gross increase "
+                              f"from trading: {_passive_mechanism(isin, mwpl, mwpl_yesterday)}")
+
+            checks.append(EntityLimitCheck(
+                trade_date=trade_date, holder_id=holder_id, isin=isin,
+                limit_key=limit_key, accounts=accounts, gross_futeq=g_today,
+                mwpl=mwpl, limit_shares=limit_shares, excess_shares=excess,
+                permitted=not breached, cause=cause, reason=reason,
+            ))
+
+    return EntityLimitResult(checks=tuple(checks), not_checked=tuple(not_checked))
+
+
+def _passive_mechanism(isin, mwpl, mwpl_yesterday) -> str:
+    """Names the passive mechanism. A missing yesterday-MWPL makes the
+    explanation less specific, never the cause unknown (addendum B)."""
+    if mwpl_yesterday is None or isin not in mwpl_yesterday:
+        return "mechanism not identified (no MWPL for yesterday)"
+    before = mwpl_yesterday[isin]
+    if before > mwpl:
+        return f"MWPL cut from {before} to {mwpl} lowered the limit"
+    if before < mwpl:
+        return (f"MWPL rose from {before} to {mwpl}, so delta factors moved "
+                f"(PASSIVE does not mean no trading)")
+    return "MWPL unchanged, so delta factors moved (PASSIVE does not mean no trading)"
