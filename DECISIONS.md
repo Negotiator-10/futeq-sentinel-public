@@ -1221,6 +1221,69 @@ corporates 20%; that sub-category 10%. `config/rules.yaml` already carried all s
   puts C001 at two brokers, one opening a fresh position and one holding, and asserts the breach
   lands on the right client.
 
+### #016 addendum 2: how the runner records row 7, 12 Nov 2026
+<!-- Authorship. The three answers are mine, given on 12 Nov to three gaps Claude found when it
+     checked my first answer against store.py and runner.py. Claude added the RefusalStage.ROW7
+     plumbing, the old-store guard, and the cross-table check in record_row7(). -->
+
+My first answer was that an unknown account is a whole-stage row 7 refusal in the `refusal`
+table, inside the day's transaction, like row 6's. It is not recorded in `run_log`, because
+`run_log` holds the outcome of the whole run. Row 7 stopping does not make the ban forecast,
+reconciliation or row 6 wrong, so the run still ends COMPLETED. The report shows row 7 as
+"Refused" with the reason, never as zero breaches. That answer had three gaps.
+
+- **1. A scrip with no MWPL: one refusal per scrip, and the holders it affected go in row 7's
+  own table.** The refusal is `(date, ROW7, isin)` with a reason such as "no MWPL in today's
+  combineoi; 2 checks not made". I chose one per scrip because the cause, no MWPL, is a fact
+  about the stock, not about any holder: one cause, one row, and it fits the table's existing key
+  `(trade_date, stage, subject)`. With the ISIN as subject and one refusal per holder, my own
+  no-MWPL test would have broken it: H1's client check and TMA's 30% both fall on scrip Y, the
+  second insert would collide, and the whole day would roll back.
+
+  I rejected a subject like `holder|isin|limit`, because it packs three fields into one string,
+  a key that has to be parsed later. The split instead: the `refusal` table says what could not
+  be done and why; `row7_not_checked` holds each `NotChecked(holder, isin, limit_key, reason)`
+  beside the checks in `row7_check`, and says who it affected. The report says the scrip was
+  refused and why, and lists the holders from row 7's table.
+
+- **2. NoPriorDay is declared, never inferred.** The runner must not infer a first run from a
+  missing book: that is the same mistake as inferring a holiday from a missing file. So the book
+  gets a declared start date in config, and:
+
+  | Situation | Result |
+  |---|---|
+  | D is the declared start date | `NoPriorDay`, reason "first day of the book"; causes are UNKNOWN |
+  | D is later, and yesterday's book is missing | row 7 refused: "no prop book for D-1" |
+  | D is earlier than the start date | row 7 refused: "before the book's start date" |
+
+  I rejected inferring it from "no earlier date in the file", because a truncated file would look
+  exactly like a first run and every cause would quietly become UNKNOWN. A declared date is a
+  statement someone made on purpose, like the FLAT marker (#015).
+
+- **3. Two failure points, two reasons.** `ReferenceDataError` is raised both by
+  `load_reference()` for a malformed holders or accounts file and by `check_entity_limit()` for
+  a position in an unknown account. The runner catches it in two separate places, so the reason
+  says which it was: "reference data could not be loaded: [message]" and "position in unknown
+  account: [message]". Both are whole-stage row 7 refusals with an empty subject, and the run
+  still completes. Nothing else is caught: any other exception is a real failure.
+
+- **Plumbing these needed.**
+  * `RefusalStage.ROW7`, and `'row7'` in the `refusal` table's stage CHECK. The schema is
+    CREATE TABLE IF NOT EXISTS, so an older store keeps its old CHECK and its first row 7 refusal
+    would fail mid-transaction, rolling the day back. Such a store is refused when it is opened,
+    the same remedy as the REAL-column guard: move it aside and re-run its days.
+  * `record_row7()` refuses a (holder, scrip, limit) already stored in the *other* table. Each
+    table's own re-run rule cannot see this: a re-run where a scrip lost its MWPL would add a row
+    to `row7_not_checked` and leave the old one in `row7_check`, so the day would say both.
+  * `cause` is NULL in `row7_check` exactly on a pass, enforced by a CHECK. That NULL means "no
+    breach to explain", not a missing value, so decision 5 of #019 holds.
+
+- **Outcome.** Accepted, 12 Nov 2026. `check_entity_limit()` landed in 8390691 with 20 tests;
+  its mutation check killed 8 of 8 mutants, including a Cat II corporate given FAQ 15's 20%. The
+  refusal stage and its guard are in 5738320. The two row 7 tables, their writer and reader are
+  built with 8 store tests. Still to do: the book start date in config, and the runner and report
+  wiring.
+
 ## #017: SAIL's release as a second fixture window, 9 Nov 2026
 <!-- Authorship. What to assert - held on 3 and 4 Nov, released for 6 Nov, kept out on 6 Nov -
      and that both in-band cases belong in CI on one stock, are mine. Claude read "held on 3 and

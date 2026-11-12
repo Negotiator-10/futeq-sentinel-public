@@ -24,7 +24,10 @@ from pathlib import Path
 import pytest
 
 from sentinel.calendar import UnknownDateError, load_calendar
-from sentinel.engine import ReductionCheck, reconcile
+from sentinel.engine import (
+    EntityLimitCheck, EntityLimitResult, LimitCause, NotChecked, ReductionCheck, reconcile,
+)
+from sentinel.entities import TM_COMBINED_LIMIT_KEY, Category
 from sentinel.parsers import MwplRow
 from sentinel.rules import load_rules
 from sentinel.runlock import RunInProgressError, RunLock
@@ -95,6 +98,23 @@ def write_a_day(store, run, rules):
 ROW6 = ReductionCheck(trade_date=WED4, tm="TMA", ucc="C001", isin=HELD_ISIN,
                       yesterday_delta=Decimal("1000"), baseline=Decimal("980.50000001"),
                       today_delta=Decimal("0"), permitted=True, reason="closed out from 980.5")
+
+
+# Row 7: a breach by a two-account client (whose cause needs its own column), a TM pass (cause
+# NULL), and a scrip with no MWPL, not checked for one holder.
+CLIENT_KEY = Category.CLIENT_NRI.limit_key
+ROW7_BREACH = EntityLimitCheck(
+    trade_date=WED4, holder_id="H1", isin=HELD_ISIN, limit_key=CLIENT_KEY,
+    accounts=(("TMA", "C1"), ("TMB", "C2")), gross_futeq=Decimal("100001.000000017"),
+    mwpl=1_000_000, limit_shares=Decimal("100000.0"), excess_shares=Decimal("1.000000017"),
+    permitted=False, cause=LimitCause.PASSIVE, reason="over by 1; MWPL cut from 1100000")
+ROW7_PASS = EntityLimitCheck(
+    trade_date=WED4, holder_id="TMA", isin=HELD_ISIN, limit_key=TM_COMBINED_LIMIT_KEY,
+    accounts=(("TMA", "C1"), ("TMA", "PRO")), gross_futeq=Decimal("60000"), mwpl=1_000_000,
+    limit_shares=Decimal("300000.0"), excess_shares=Decimal("0"), permitted=True, cause=None,
+    reason="within limit")
+ROW7_NC = NotChecked(WED4, "H1", TESTCO_ISIN, CLIENT_KEY, "no MWPL for this scrip in today's combineoi")
+ROW7 = EntityLimitResult((ROW7_BREACH, ROW7_PASS), (ROW7_NC,))
 
 
 # -- the lock: released by the OS when its holder dies ------------------------------------
@@ -277,6 +297,89 @@ def test_a_row7_refusal_is_stored(store, lock):
     with store.day_transaction(WED4, run.run_id):
         store.record_refusals([refusal])
     assert refusal in store.refusals(WED4)
+
+
+def test_row7_reads_back_exactly(store, lock):
+    """Checks and not-checked come back as written: Decimals exact, the accounts as pairs in
+    order, a pass's cause as None and a breach's as its LimitCause."""
+    run = start(store, lock)
+    with store.day_transaction(WED4, run.run_id):
+        store.record_row7(ROW7)
+        store.record_refusals([Refusal(WED4, RefusalStage.ROW7, TESTCO_ISIN,
+                                       "no MWPL in today's combineoi; 1 check not made")])
+    back = store.row7_result(WED4)
+    assert back == EntityLimitResult((ROW7_BREACH, ROW7_PASS), (ROW7_NC,))
+    assert back.checks[0].excess_shares == Decimal("1.000000017")
+    assert back.checks[0].accounts == (("TMA", "C1"), ("TMB", "C2"))
+    assert back.breaches == (ROW7_BREACH,)
+
+
+def test_row7_with_nothing_stored_is_empty_not_an_error(store):
+    assert store.row7_result(WED4) == EntityLimitResult((), ())
+
+
+def test_row7_only_not_checked_is_stored(store, lock):
+    run = start(store, lock)
+    with store.day_transaction(WED4, run.run_id):
+        assert len(store.record_row7(EntityLimitResult((), (ROW7_NC,)))) == 1
+    assert store.row7_result(WED4).not_checked == (ROW7_NC,)
+
+
+def test_row7_is_written_only_inside_the_day_transaction_and_never_empty(store, lock):
+    with pytest.raises(StoreError, match="only inside day_transaction"):
+        store.record_row7(ROW7)
+    run = start(store, lock)
+    with store.day_transaction(WED4, run.run_id):
+        with pytest.raises(StoreError, match="record why as a refusal"):
+            store.record_row7(EntityLimitResult((), ()))
+
+
+def test_row7_rolls_back_with_the_day(store, lock):
+    run = start(store, lock)
+    with pytest.raises(RuntimeError, match="later stage"):
+        with store.day_transaction(WED4, run.run_id):
+            store.record_row7(ROW7)
+            raise RuntimeError("later stage crashed")
+    assert store.row7_result(WED4) == EntityLimitResult((), ())
+
+
+def test_row7_identical_rerun_is_a_no_op_and_a_changed_one_refuses(store, lock):
+    first = start(store, lock)
+    with store.day_transaction(WED4, first.run_id):
+        store.record_row7(ROW7)
+    store.finish_run(first.run_id, RunOutcome.COMPLETED, lock=lock)
+
+    second = start(store, lock)
+    with store.day_transaction(WED4, second.run_id):
+        assert all(w.was_a_no_op for w in store.record_row7(ROW7))
+        changed = EntityLimitResult((ROW7_BREACH.__class__(**{**ROW7_BREACH.__dict__,
+                                                              "cause": LimitCause.ACTIVE}),), ())
+        with pytest.raises(StoreError, match="differ from what is stored"):
+            store.record_row7(changed)
+
+
+def test_row7_a_check_that_became_not_checked_on_a_rerun_refuses(store, lock):
+    """Each table alone would accept it - the key is new to row7_not_checked - and the day would
+    then hold the same (holder, scrip, limit) as both checked and not checked."""
+    first = start(store, lock)
+    with store.day_transaction(WED4, first.run_id):
+        store.record_row7(EntityLimitResult((ROW7_BREACH,), ()))
+    store.finish_run(first.run_id, RunOutcome.COMPLETED, lock=lock)
+
+    moved = NotChecked(WED4, "H1", HELD_ISIN, CLIENT_KEY, "no MWPL for this scrip in today's combineoi")
+    second = start(store, lock)
+    with store.day_transaction(WED4, second.run_id):
+        with pytest.raises(StoreError, match="already stored in row7_check"):
+            store.record_row7(EntityLimitResult((), (moved,)))
+
+
+def test_row7_the_schema_refuses_a_pass_with_a_cause(store, lock):
+    """The table holds the type's rule too, for anything that writes around the store."""
+    run = start(store, lock)
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        store._conn.execute(
+            "INSERT INTO row7_check VALUES ('2026-11-04', 'H1', ?, ?, '[]', '1', 1, '1', '0', 1, "
+            "'active', 'x', ?, 't')", (HELD_ISIN, CLIENT_KEY, run.run_id))
 
 
 def test_futeq_oi_reads_back_exactly_as_written(store, lock, rules):

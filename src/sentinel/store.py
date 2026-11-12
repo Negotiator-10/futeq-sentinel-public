@@ -34,8 +34,9 @@ times a person wants to read a day by eye.
 
 **The runner's tables (#019).** A run on D writes its results through `day_transaction()`, one
 SQLite transaction that every writer joins, so a crash part-way leaves nothing of D behind
-(decision 3). Four result tables accept writes *only* inside it - `measurement`, `reconciliation`,
-`row6_check`, `refusal` - and each row carries the `run_id` that wrote it. Inside the transaction
+(decision 3). Six result tables accept writes *only* inside it - `measurement`, `reconciliation`,
+`row6_check`, `row7_check`, `row7_not_checked`, `refusal` - and each row carries the `run_id` that
+wrote it. Inside the transaction
 for D, `ban_state` takes D's `official` state and the *next trading day's* `forecast` and nothing
 else: the two writes #011 says a run on D makes.
 
@@ -65,7 +66,9 @@ from enum import Enum
 from pathlib import Path
 
 from sentinel.calendar import DayKind, TradingCalendar, UnknownDateError
-from sentinel.engine import Reconciliation, ReductionCheck
+from sentinel.engine import (
+    EntityLimitCheck, EntityLimitResult, LimitCause, NotChecked, Reconciliation, ReductionCheck,
+)
 from sentinel.parsers import MwplRow
 from sentinel.runlock import RunLock
 
@@ -327,6 +330,41 @@ CREATE TABLE IF NOT EXISTS row6_check (
     run_id           TEXT    NOT NULL REFERENCES run_log (run_id),
     written_at       TEXT    NOT NULL,
     PRIMARY KEY (trade_date, tm, ucc, isin)
+) WITHOUT ROWID;
+
+-- Row 7, one row per (holder, scrip, limit) checked (#016). `accounts` is the JSON list of
+-- [tm, ucc] pairs the gross was summed over. `cause` is NULL exactly on a pass, where there is
+-- no breach to explain - that is "not applicable", enforced below, never "missing".
+CREATE TABLE IF NOT EXISTS row7_check (
+    trade_date     TEXT    NOT NULL,
+    holder_id      TEXT    NOT NULL CHECK (length(holder_id) > 0),
+    isin           TEXT    NOT NULL,
+    limit_key      TEXT    NOT NULL CHECK (length(limit_key) > 0),
+    accounts       TEXT    NOT NULL,
+    gross_futeq    TEXT    NOT NULL,
+    mwpl           INTEGER NOT NULL CHECK (mwpl > 0),
+    limit_shares   TEXT    NOT NULL,
+    excess_shares  TEXT    NOT NULL,
+    permitted      INTEGER NOT NULL CHECK (permitted IN (0, 1)),
+    cause          TEXT    CHECK (cause IN ('active', 'passive', 'unknown')),
+    reason         TEXT    NOT NULL CHECK (length(reason) > 0),
+    run_id         TEXT    NOT NULL REFERENCES run_log (run_id),
+    written_at     TEXT    NOT NULL,
+    PRIMARY KEY (trade_date, holder_id, isin, limit_key),
+    CHECK ((permitted = 1) = (cause IS NULL))
+) WITHOUT ROWID;
+
+-- Row 7's checks that could not be made, one per (holder, scrip, limit): who a scrip's
+-- refusal affected. The refusal itself - what could not be done, and why - is in `refusal`.
+CREATE TABLE IF NOT EXISTS row7_not_checked (
+    trade_date  TEXT    NOT NULL,
+    holder_id   TEXT    NOT NULL CHECK (length(holder_id) > 0),
+    isin        TEXT    NOT NULL,
+    limit_key   TEXT    NOT NULL CHECK (length(limit_key) > 0),
+    reason      TEXT    NOT NULL CHECK (length(reason) > 0),
+    run_id      TEXT    NOT NULL REFERENCES run_log (run_id),
+    written_at  TEXT    NOT NULL,
+    PRIMARY KEY (trade_date, holder_id, isin, limit_key)
 ) WITHOUT ROWID;
 
 -- Decision 5: a missing input is stated here, never left as a NULL somewhere else.
@@ -808,6 +846,51 @@ class BanStateStore:
         return self._insert_results("row6_check", ("trade_date", "tm", "ucc", "isin"), values,
                                     day, run_id)
 
+    def record_row7(self, result: EntityLimitResult) -> tuple[WriteResult, ...]:
+        """Row 7's checks and not-checked entries for one day, into their two tables.
+
+        An empty result is refused, as every writer refuses one: a flat book writes nothing and
+        the COMPLETED run with no row 7 refusal is what says so. A key may sit in only one of
+        the two tables. Each table's own re-run rule cannot see that: a re-run that moved a
+        (holder, scrip, limit) from checked to not checked would add a row to one table and
+        leave the old row in the other, so the day would say both.
+        """
+        if not isinstance(result, EntityLimitResult):
+            raise StoreError(f"record_row7() takes an EntityLimitResult, not {type(result).__name__}")
+        day = _single_date((*result.checks, *result.not_checked), "record_row7")
+        run_id = self._require_txn(day)
+
+        for table, entries in (("row7_not_checked", result.checks),
+                               ("row7_check", result.not_checked)):
+            for e in entries:
+                clash = self._conn.execute(
+                    f"SELECT 1 FROM {table} WHERE trade_date = ? AND holder_id = ? AND isin = ? "
+                    f"AND limit_key = ?", (day.isoformat(), *e.key)).fetchone()
+                if clash is not None:
+                    raise StoreError(
+                        f"row 7 for {day}: {e.key} is already stored in {table}. A re-run that "
+                        f"moves a check between checked and not checked has a changed input, "
+                        f"which refuses rather than overwrites (#019 decision 11)."
+                    )
+
+        key = ("trade_date", "holder_id", "isin", "limit_key")
+        written = []
+        if result.checks:
+            written.append(self._insert_results("row7_check", key, [{
+                "trade_date": day.isoformat(), "holder_id": c.holder_id, "isin": c.isin,
+                "limit_key": c.limit_key, "accounts": json.dumps([list(a) for a in c.accounts]),
+                "gross_futeq": str(c.gross_futeq), "mwpl": c.mwpl,
+                "limit_shares": str(c.limit_shares), "excess_shares": str(c.excess_shares),
+                "permitted": int(c.permitted),
+                "cause": None if c.cause is None else c.cause.value, "reason": c.reason,
+            } for c in result.checks], day, run_id))
+        if result.not_checked:
+            written.append(self._insert_results("row7_not_checked", key, [{
+                "trade_date": day.isoformat(), "holder_id": n.holder_id, "isin": n.isin,
+                "limit_key": n.limit_key, "reason": n.reason,
+            } for n in result.not_checked], day, run_id))
+        return tuple(written)
+
     def record_refusals(self, refusals: Iterable[Refusal]) -> WriteResult:
         refusals = tuple(refusals)
         day = _single_date(refusals, "record_refusals")
@@ -904,6 +987,28 @@ class BanStateStore:
             today_delta=Decimal(r["today_delta"]), permitted=bool(r["permitted"]),
             reason=r["reason"],
         ) for r in rows)
+
+    def row7_result(self, day: dt.date) -> EntityLimitResult:
+        """D's row 7 checks and not-checked entries, rebuilt so their invariants are checked on
+        the way out. Empty means only "nothing stored"; why is in `refusals()` and `run_log`."""
+        d = day.isoformat()
+        checks = tuple(EntityLimitCheck(
+            trade_date=day, holder_id=r["holder_id"], isin=r["isin"], limit_key=r["limit_key"],
+            accounts=tuple(tuple(a) for a in json.loads(r["accounts"])),
+            gross_futeq=Decimal(r["gross_futeq"]), mwpl=r["mwpl"],
+            limit_shares=Decimal(r["limit_shares"]), excess_shares=Decimal(r["excess_shares"]),
+            permitted=bool(r["permitted"]),
+            cause=None if r["cause"] is None else LimitCause(r["cause"]), reason=r["reason"],
+        ) for r in self._conn.execute(
+            "SELECT * FROM row7_check WHERE trade_date = ? ORDER BY holder_id, isin, limit_key",
+            (d,)).fetchall())
+        not_checked = tuple(NotChecked(
+            trade_date=day, holder_id=r["holder_id"], isin=r["isin"], limit_key=r["limit_key"],
+            reason=r["reason"],
+        ) for r in self._conn.execute(
+            "SELECT * FROM row7_not_checked WHERE trade_date = ? "
+            "ORDER BY holder_id, isin, limit_key", (d,)).fetchall())
+        return EntityLimitResult(checks, not_checked)
 
     def refusals(self, day: dt.date) -> tuple[Refusal, ...]:
         rows = self._conn.execute(
