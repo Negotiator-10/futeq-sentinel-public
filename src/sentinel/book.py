@@ -44,11 +44,17 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 
+import yaml
+
+from sentinel.calendar import DayKind
+
 __all__ = [
     "Instrument",
     "Position",
     "PropBook",
     "NoPriorDay",
+    "BookStart",
+    "load_book_start",
     "DeltaFactors",
     "BookError",
     "load_book",
@@ -679,3 +685,71 @@ def _parse_nse_date(text: str, path: str | Path, lineno: int) -> dt.date:
         return dt.datetime.strptime(text.strip(), "%d-%m-%Y").date()
     except ValueError as exc:
         raise BookError(f"{path} line {lineno}: {text!r} is not a d-m-Y date") from exc
+
+# ---------------------------------------------------------------- the declared start
+
+DEFAULT_BOOK_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "book.yaml"
+
+
+@dataclass(frozen=True)
+class BookStart:
+    """The prop book's declared first day (#016 addendum 2, point 2).
+
+    The only day on which yesterday is a `NoPriorDay`. It is declared, never inferred from the
+    earliest date in the positions file, because a truncated file would then pass as a first run
+    and every row 7 cause would quietly become UNKNOWN - the same mistake as reading a holiday off
+    a missing file. What the runner does with it is the runner's business; this only reads it.
+    """
+
+    start_date: dt.date
+    reason: str
+    path: Path
+
+
+_BOOK_CONFIG_KEYS = {"start_date", "reason"}
+
+
+def load_book_start(path: str | Path | None = None, *, calendar=None) -> BookStart:
+    """Read `config/book.yaml`, or the file a test points `RunPaths.book_config` at.
+
+    Refuses a missing file, a missing or misspelt key, a quoted or timestamped date, and a blank
+    reason - a start date that half-loads would decide row 7's causes on a guess. With a
+    `TradingCalendar`, also refuses a start that is not a normal trading day: the runner only
+    ever compares D against it, so a start on a holiday would never match, and every day after
+    would be refused for a missing yesterday-book that was never meant to exist.
+    """
+    path = Path(DEFAULT_BOOK_CONFIG_PATH if path is None else path)
+    if not path.exists():
+        raise BookError(
+            f"{path}: no declared book start date. It is not inferred from the positions file "
+            f"(#016 addendum 2), so without it row 7 cannot tell a first run from a missing day."
+        )
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise BookError(f"{path}: expected start_date and reason, found {type(raw).__name__}")
+    if set(raw) != _BOOK_CONFIG_KEYS:
+        missing = sorted(_BOOK_CONFIG_KEYS - set(raw))
+        extra = sorted(set(raw) - _BOOK_CONFIG_KEYS)
+        raise BookError(f"{path}: keys must be exactly start_date and reason "
+                        f"(missing {missing}, unexpected {extra})")
+
+    start = raw["start_date"]
+    # datetime is a subclass of date, so the type is checked exactly.
+    if type(start) is not dt.date:
+        raise BookError(
+            f"{path}: start_date is {start!r} ({type(start).__name__}). Write a bare ISO date, "
+            f"such as 2025-10-01, unquoted and with no time."
+        )
+    reason = raw["reason"]
+    if not isinstance(reason, str) or not reason.strip():
+        raise BookError(f"{path}: the start date has no reason. Say why the book starts then.")
+
+    if calendar is not None:
+        kind = calendar.kind(start)
+        if kind is not DayKind.TRADING:
+            raise BookError(
+                f"{path}: the book starts on {start}, which the calendar says is "
+                f"{kind.value}, not a trading day. The runner would never see that date, and "
+                f"would refuse every later day for want of a yesterday-book."
+            )
+    return BookStart(start_date=start, reason=" ".join(reason.split()), path=path)

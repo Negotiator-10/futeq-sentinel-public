@@ -1284,6 +1284,15 @@ reconciliation or row 6 wrong, so the run still ends COMPLETED. The report shows
   built with 8 store tests. Still to do: the book start date in config, and the runner and report
   wiring.
 
+- **Point 2's date, declared 12 Nov 2026: 1 Oct 2025.** It is the first day of the 2025/79
+  regime and of the replay window (#020), so a book built for the replay starts where the replay
+  does. It lives in `config/book.yaml`, not `rules.yaml`, because it is a project choice with no
+  circular: the rules loader would report it as an unverified rule on every run. It is
+  overridable the way `RunPaths` is, through `RunPaths.book_config`, so the synthetic tests can
+  declare 12 Oct 2026 as their own start. The loader refuses a missing file, a misspelt key, a
+  quoted or timestamped date, a blank reason, and a start the calendar does not call a trading
+  day, since the runner would never see that date and would refuse every later one.
+
 ## #017: SAIL's release as a second fixture window, 9 Nov 2026
 <!-- Authorship. What to assert - held on 3 and 4 Nov, released for 6 Nov, kept out on 6 Nov -
      and that both in-band cases belong in CI on one stock, are mine. Claude read "held on 3 and

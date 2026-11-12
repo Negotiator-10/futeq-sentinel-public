@@ -29,7 +29,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sentinel.book import load_books, load_delta_factors
+from sentinel.book import DEFAULT_BOOK_CONFIG_PATH, load_books, load_delta_factors
 from sentinel.calendar import (
     ChainUnverifiedError, DayKind, UnknownDateError, load_calendar,
 )
@@ -64,6 +64,9 @@ class RunPaths:
     store: Path
     lock: Path
     book: Path
+    # The declared book start (#016 addendum 2). A default, so existing callers keep working;
+    # a test declares its own start by pointing this at its own file.
+    book_config: Path = DEFAULT_BOOK_CONFIG_PATH
 
     @classmethod
     def default(cls) -> RunPaths:
@@ -76,6 +79,7 @@ class RunPaths:
             store=data / "store" / "sentinel.sqlite",
             lock=data / "store" / "runner.lock",
             book=data / "book" / "positions.csv",
+            book_config=config / "book.yaml",
         )
 
     def combineoi(self, day: dt.date) -> Path:

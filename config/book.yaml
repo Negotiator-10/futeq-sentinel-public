@@ -1,0 +1,15 @@
+# The prop book's declared first day. A project choice, not a regulatory rule, so it lives here
+# and not in rules.yaml: it has no circular to cite and is never "verified" against one.
+#
+# Why it is declared (DECISIONS.md #016 addendum 2, point 2): row 7 needs yesterday's book to
+# say whether a breach was ACTIVE or PASSIVE. Only on this date is there genuinely no yesterday,
+# and the cause is UNKNOWN. After it, a missing yesterday-book refuses row 7; before it, row 7
+# refuses. Inferring a first run from "no earlier date in the file" would let a truncated file
+# pass as a first run, with every cause quietly UNKNOWN.
+#
+# Tests point RunPaths.book_config at their own file to declare their own start.
+
+start_date: 2025-10-01
+reason: >-
+  1 Oct 2025 is the first day of the SEBI 2025/79 regime and of the replay window (#020), so a
+  book built for the replay starts where the replay does.
