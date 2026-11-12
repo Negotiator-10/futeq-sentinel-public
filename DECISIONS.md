@@ -1481,3 +1481,60 @@ covered, and the time goes to the replay and row 7.
    it needs intraday positions, which no end-of-day file carries.
 
 **Outcome.** Accepted, 11 Nov 2026. Downloads start with November 2026, newest first.
+
+## #021: Week 3's order, and how each piece is done, 12 Nov 2026
+<!-- Authorship. The decisions are mine, given on 12 Nov before any Week 3 code. The free-float
+     source and manual route in 5 are Claude's answer to my question, not yet checked against
+     SEBI 2025/79 para 5.2.3. -->
+
+1. **Order.** Row 7 first, since it is fully designed (#016 and its addendum). Then deltas,
+   FutEq OI, MWPL, the data-quality monitors, and the circular watcher.
+
+2. **Row 7.** I write `check_entity_limit()` to #016 and its addendum: net within each account,
+   gross across a holder's accounts, one check per holder, scrip and limit, the excess in shares,
+   and the cause as ACTIVE, PASSIVE or UNKNOWN. How the runner records it is #016 addendum 2.
+
+3. **Deltas: Path B.** I compute them with Black-76, using the convention in SURV70553
+   Annexure 2, and measure the error against the one `Contract_Delta` file I have. Part of the
+   result is whether that index-option convention holds for stock options (`SPEC.md` row 11,
+   unverified). Claude writes the file reading and the comparison harness.
+
+4. **FutEq OI, computed from open interest and my deltas.** It will be gross, because public
+   files have no per-client positions, so it cannot match NSE exactly. The gap is the result,
+   reported as such.
+
+5. **MWPL: all 218.** I validate the formula on about 10 chosen stocks first, including some of
+   the 55 whose MWPL did not move at the 1 Oct reset, then extend to the rest. I record the
+   source of every free-float figure, report every mismatch grouped by cause, and list any stock
+   I cannot compute as "not computed" with the reason.
+   * Free float, `unverified`: each company's quarterly shareholding pattern, by hand from its
+     NSE page (Corporate Filings, Shareholding Pattern), taking the quarter in force at the
+     reset and citing the public shares, the filing period and the filing date. Para 5.2.3's
+     own definitions of free float and ADDV come first.
+   * ADDV needs three months of cash-market data per stock, about 63 trading days for each reset
+     I validate. Ten stocks first keeps that download small until the formula is proven.
+
+6. **Data-quality monitors: every threshold set from the year's data, not guessed.** Claude
+   measures across the 273 sessions: the largest genuine one-day changes in FutEq OI and in row
+   count, the 8 single-stock MWPL moves, and the F&O list changes. My starting position:
+   * an implausible OI jump quarantines that stock;
+   * a sharp row-count drop refuses the file;
+   * a many-stock MWPL change on a non-quarter day is an alert; a single-stock one is a notice
+     to check for a corporate action;
+   * new or removed stocks, and lot-size changes, are notices.
+
+   Each is a project choice. Open: where they live. The book start date went to
+   `config/book.yaml` rather than `rules.yaml` because the rules loader would report a project
+   choice with no circular as an unverified rule on every run; the thresholds raise the same
+   question.
+
+7. **The circular watcher is manual and daily, not automated.** I check NSE's and SEBI's circular
+   pages by hand each trading evening, with the day's downloads. The 15 Jan 2026 holiday was
+   announced three days ahead, so a weekly check could miss one. The tool records each check,
+   lets me log a relevant circular against the rules it affects, and the report shows "circulars
+   not checked since [date]" when a day is missed. I read SEBI's terms before considering
+   automating that side, as NSE's ruled it out (#010 addendum). This replaces PLAN.md Week 3
+   D5's daily automated scan.
+
+**Outcome.** Accepted, 12 Nov 2026. Row 7's engine and store are done the same day (8390691,
+5738320, e3bb265, 553b210); its runner and report wiring are next.

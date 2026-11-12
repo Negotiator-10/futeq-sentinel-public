@@ -403,3 +403,47 @@ how many days I will download by hand for the replay, and the scope cuts.
 **Next:** record the reset calendar in `config/rules.yaml` as observed, from
 the eight files either side of each reset. Then Week 3: deltas, FutEq and MWPL
 computed by me rather than read as published, and row 7.
+
+## 12 Nov 2026 (Thu): Week 3 Day 1, row 7
+
+- **Carried over from 11 Nov:** the reset calendar is recorded in `rules.yaml` as observed
+  (`6bcf381`), the sample reports re-rendered with no assumed rules left (`4516aeb`), and the
+  public repository rebuilt to `eae2785`, CI green.
+- **Week 3 decided** (#021): row 7 first, then deltas by Path B (Black-76, measured against
+  the one `Contract_Delta` file), FutEq OI as a gross figure whose gap to NSE is the result,
+  MWPL for all 218 with 10 first, data-quality thresholds set from the year's data, and a
+  manual daily circular watcher.
+- **Row 7's types** (`50c7f16`, Claude): `LimitCause`, `EntityLimitCheck`, `NotChecked`,
+  `EntityLimitResult` and `NoPriorDay`, each refusing what cannot be true - a cause on a pass,
+  an excess that is not G minus the limit, one check reported twice.
+- **`check_entity_limit()`, mine** (`8390691`). Net within an account, gross across accounts;
+  a TM's 20% and 30%, with FPI and MF accounts left out of the 30%, and no TM checked again as
+  a holder; the cause from yesterday's live holdings at today's factors. Review added three date
+  checks: yesterday must be the previous trading day, a `NoPriorDay` must be for today, and the
+  reference snapshot must be for today. 19 tests of mine on Claude's fixtures; the mutation check
+  killed 8 of 8, including a Cat II corporate given FAQ 15's 20%.
+- **The lesson:** a mutant can be killed by a safety check instead of my assertion. Dropping
+  `live_on` stopped at `factor()` refusing an expired contract before my test compared the
+  cause - a second defence working, not a weak test, but I should know which defence catches
+  each mistake.
+- **How the runner records row 7** (#016 addendum 2). An unknown account is a whole-stage row 7
+  refusal and the run still completes. A scrip with no MWPL is one refusal per scrip, with who it
+  affected in row 7's own table. `NoPriorDay` only on a declared book start date, never inferred.
+  `ReferenceDataError` caught in two places with two reasons.
+- **Plumbing for it** (Claude): `RefusalStage.ROW7`, refusing a store whose CHECK predates it
+  (`5738320`); `row7_check` and `row7_not_checked`, with a cross-table check a re-run cannot
+  slip past (`e3bb265`); the book start date, 1 Oct 2025, in `config/book.yaml`, overridable
+  through `RunPaths.book_config` (`553b210`).
+- **Tests:** 542 pass locally.
+- **Pushed:** up to `8390691` only. The later commits are local. The public rebuild waits until
+  row 7 is wired in and the docs are updated.
+
+**Next:** write the runner's row 7 stage: load the book start and the reference data, choose
+`NoPriorDay` or a refusal by the start date, catch `ReferenceDataError` in its two places, record
+one ROW7 refusal per no-MWPL scrip with the count, and call `store.record_row7()` inside the day's
+transaction. Then Claude adds `book.yaml` to `input_checksums()` and the report's row 7 section.
+After that, deltas: Claude's file reader and comparison harness, then my Black-76.
+
+**Still owed by me:** today's `LEARNING.md` entry (the mutant killed by a safety check), the
+application paragraph with the year's numbers, and the `PLAN.md` tick list, which is behind
+(runner, v0.1, README, row 7).
