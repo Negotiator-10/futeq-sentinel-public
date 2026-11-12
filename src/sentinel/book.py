@@ -48,6 +48,7 @@ __all__ = [
     "Instrument",
     "Position",
     "PropBook",
+    "NoPriorDay",
     "DeltaFactors",
     "BookError",
     "load_book",
@@ -185,6 +186,32 @@ class Position:
     def quantity_shares(self) -> int:
         """Signed position in shares, before any delta is applied."""
         return self.quantity_lots * self.lot_size
+
+
+@dataclass(frozen=True)
+class NoPriorDay:
+    """Yesterday, stated as absent on purpose: the first run there is, with no book before it.
+
+    A third thing, kept apart from the two it could be mistaken for (#015):
+
+        verified: nothing was held yesterday     PropBook.flat(yesterday)
+        yesterday's file never arrived           no PropBook - the caller's lookup fails
+        there is no yesterday to ask about       NoPriorDay(trade_date, reason)
+
+    Row 7 takes `PropBook | NoPriorDay` as yesterday (#016 addendum, decision 2): the verdict is
+    still computed from today's holdings, and the cause of a breach is UNKNOWN, stated, rather
+    than guessed. It has to be written deliberately, with the day it stands in for and why.
+    """
+
+    trade_date: dt.date      # the day whose yesterday this stands in for
+    reason: str
+
+    def __post_init__(self) -> None:
+        if not self.reason.strip():
+            raise BookError(
+                f"NoPriorDay for {self.trade_date} has no reason. It must say why there is no "
+                f"yesterday - a first run - or it is just a missing file with a nicer name."
+            )
 
 
 class PropBook:

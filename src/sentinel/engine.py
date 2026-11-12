@@ -17,9 +17,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from enum import Enum
 
-from sentinel.book import BookError, DeltaFactors, PropBook, futeq_delta, live_on
+from sentinel.book import BookError, DeltaFactors, NoPriorDay, PropBook, futeq_delta, live_on
 from sentinel.calendar import TradingCalendar
+from sentinel.entities import TM_COMBINED_LIMIT_KEY, Category, Snapshot
 from sentinel.parsers import MwplRow
 from sentinel.rules import Rules
 
@@ -34,6 +36,11 @@ __all__ = [
     "ReductionCheck",
     "check_ban_period_reduction",
     "check_entity_limit",
+    "LimitCause",
+    "EntityLimitCheck",
+    "NotChecked",
+    "EntityLimitResult",
+    "ENTITY_LIMIT_KEYS",
 ]
 
 
@@ -428,10 +435,170 @@ def _reason(baseline: Decimal, today: Decimal, yesterday: Decimal,
 # ===========================================================================
 
 
-def check_entity_limit(category: str, futeq_oi: float, mwpl: int, rules: Rules):
-    """Whether an entity's FutEq OI is inside its category's share of MWPL (SPEC row 7).
+# -- row 7's result types (plumbing; the check itself is Chintamani's) ----------------------
 
-    The signature is the one SPEC row 7 names, with `rules` added because the percentages come
-    from config/rules.yaml and not from a literal here. The return type is yours.
+
+class LimitCause(Enum):
+    """Why a breach happened (#016 addendum B). Set only on a breach, never on a pass.
+
+    G is decision 2's gross measure: the sum over the accounts of |net FutEq of that account|.
+    """
+
+    ACTIVE = "active"    # G at today's holdings > G at yesterday's live holdings, both at today's factors
+    PASSIVE = "passive"  # the holdings did not add to G: an MWPL cut, or option factors moved
+    UNKNOWN = "unknown"  # yesterday is NoPriorDay, so there is nothing to compare against
+
+
+#: Every limit a row 7 check can be against: one per holder category, plus a TM's 30%.
+ENTITY_LIMIT_KEYS = frozenset({c.limit_key for c in Category} | {TM_COMBINED_LIMIT_KEY})
+
+
+def _check_limit_key(limit_key: str, where: str) -> None:
+    if limit_key not in ENTITY_LIMIT_KEYS:
+        raise ValueError(
+            f"{where}: limit_key {limit_key!r} is not an entity limit. Use one of "
+            f"{sorted(ENTITY_LIMIT_KEYS)}."
+        )
+
+
+@dataclass(frozen=True)
+class EntityLimitCheck:
+    """One holder's (or one TM's) gross FutEq in one scrip, against one limit (SPEC row 7).
+
+    Every check is returned, breached or not (#016 decision 5): "nothing checked" must not look
+    like "everything passed". A trading member gets two - its 20% on its proprietary accounts and
+    its 30% on those plus its clients' - told apart by `limit_key`.
+    """
+
+    trade_date: dt.date
+    holder_id: str                          # the holder, or the TM for its 20% and 30%
+    isin: str
+    limit_key: str                          # the rules.yaml path of the limit applied
+    accounts: tuple[tuple[str, str], ...]   # the (tm, ucc) accounts aggregated into G
+    gross_futeq: Decimal                    # G, in shares
+    mwpl: int
+    limit_shares: Decimal                   # the limit's share of MWPL, in shares
+    excess_shares: Decimal                  # G - limit_shares on a breach, else 0
+    permitted: bool
+    cause: LimitCause | None                # None exactly when permitted
+    reason: str
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.holder_id, self.isin, self.limit_key)
+
+    def __post_init__(self) -> None:
+        where = f"{self.trade_date} {self.holder_id} {self.isin} {self.limit_key}"
+        _check_limit_key(self.limit_key, where)
+        for name in ("gross_futeq", "limit_shares", "excess_shares"):
+            if not isinstance(getattr(self, name), Decimal):
+                raise TypeError(f"{where}: {name} must be a Decimal, not "
+                                f"{type(getattr(self, name)).__name__}")
+        if not self.accounts:
+            raise ValueError(f"{where}: no accounts. A check aggregates at least one account.")
+        if self.gross_futeq < 0:
+            raise ValueError(f"{where}: G is {self.gross_futeq}. A sum of absolute values cannot "
+                             f"be negative.")
+        if self.mwpl <= 0:
+            raise ValueError(f"{where}: MWPL is {self.mwpl}.")
+        if self.permitted != (self.cause is None):
+            raise ValueError(
+                f"{where}: permitted={self.permitted} with cause={self.cause}. A cause is set "
+                f"exactly when the limit is breached (#016 addendum decision 2)."
+            )
+        if self.permitted and self.excess_shares != 0:
+            raise ValueError(f"{where}: permitted, but excess_shares is {self.excess_shares}.")
+        if not self.permitted and self.excess_shares != self.gross_futeq - self.limit_shares:
+            raise ValueError(
+                f"{where}: excess_shares {self.excess_shares} is not G - limit "
+                f"({self.gross_futeq} - {self.limit_shares}). The penalty is charged on it "
+                f"(#016 decision 5), so it has to be the exact difference."
+            )
+        if not self.permitted and self.excess_shares <= 0:
+            raise ValueError(f"{where}: breached, but excess_shares is {self.excess_shares}.")
+        if not self.reason.strip():
+            raise ValueError(f"{where}: no reason.")
+
+
+@dataclass(frozen=True)
+class NotChecked:
+    """A check that could not be made, and why - for example, no MWPL for the scrip today."""
+
+    trade_date: dt.date
+    holder_id: str
+    isin: str
+    limit_key: str
+    reason: str
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return (self.holder_id, self.isin, self.limit_key)
+
+    def __post_init__(self) -> None:
+        where = f"{self.trade_date} {self.holder_id} {self.isin} {self.limit_key}"
+        _check_limit_key(self.limit_key, where)
+        if not self.reason.strip():
+            raise ValueError(f"{where}: not checked, with no reason. Say why.")
+
+
+@dataclass(frozen=True)
+class EntityLimitResult:
+    """Every row 7 check for one day, and every check that could not be made.
+
+    Refuses two entries for the same (holder, scrip, limit). The case it exists for: a trading
+    member is also a holder, and its own limit IS its 20% on its proprietary accounts, so a holder
+    loop that does not skip TMs would report the same check twice.
+    """
+
+    checks: tuple[EntityLimitCheck, ...]
+    not_checked: tuple[NotChecked, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.checks, tuple) or not isinstance(self.not_checked, tuple):
+            raise TypeError("checks and not_checked must be tuples")
+        everything = [*self.checks, *self.not_checked]
+        days = {e.trade_date for e in everything}
+        if len(days) > 1:
+            raise ValueError(f"one day at a time; got {sorted(days)}")
+        seen: set[tuple[str, str, str]] = set()
+        for e in everything:
+            if e.key in seen:
+                raise ValueError(
+                    f"{e.key} appears twice. One holder, scrip and limit is one check. If the "
+                    f"holder is a trading member, its own limit is its 20% proprietary check - "
+                    f"the holder loop should skip trading members."
+                )
+            seen.add(e.key)
+
+    @property
+    def breaches(self) -> tuple[EntityLimitCheck, ...]:
+        return tuple(c for c in self.checks if not c.permitted)
+
+
+def check_entity_limit(
+    today: PropBook,
+    yesterday: PropBook | NoPriorDay,
+    factors_today: DeltaFactors,
+    reference: Snapshot,
+    mwpl_today: Mapping[str, int],
+    mwpl_yesterday: Mapping[str, int] | None,
+    symbol_for_isin: Mapping[str, str],
+    rules: Rules,
+) -> EntityLimitResult:
+    """Every holder's and trading member's gross FutEq, per scrip, against its limit (SPEC row 7).
+
+    The design is #016 and its addendum; the answers below were settled on 12 Nov 2026.
+
+    - One check per holder per scrip it holds today, against its category's limit - skipping
+      trading members, whose own limit is their 20% check. Per trading member, two checks per
+      scrip held in its account sets: 20% on its proprietary accounts, 30% on those plus its
+      CLIENT/NRI accounts. Same G twice when the proprietary book is its only account.
+    - G = sum over the accounts of |net FutEq of that account| (decision 2), in shares.
+    - A position in an account the reference data does not know: refuse the whole stage, since it
+      could belong to any holder and every total might be understated. `reference.account()`
+      raises ReferenceDataError for it.
+    - A scrip with no MWPL today: its checks are NotChecked, with the reason; the rest run.
+    - The cause on a breach: ACTIVE, PASSIVE, or UNKNOWN when yesterday is NoPriorDay (addendum B).
+      `mwpl_yesterday` only names which passive mechanism it was.
     """
     raise NotImplementedError("mine to write")
