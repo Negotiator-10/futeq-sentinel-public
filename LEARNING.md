@@ -247,6 +247,68 @@ the full comparison runs locally against data/.
 *Changes:* before treating a hash as secret, I count how many inputs
 could have produced it.
 
+## 12 Nov 2026
+
+**1. An empty value that means three things means nothing.**
+Row 6's stage returns `()` when it refused, when the book was flat, and
+`DayResults` holds `()` before it runs at all. In the store, "refused",
+"nothing held" and "never ran" all look the same: the #015 mistake
+again, one level up. For row 7 I wrote an explicit outcome,
+`Row7Outcome`, with a status of CHECKED, FLAT or REFUSED, and `None`
+meaning "not run", which looks like none of them. Its `__post_init__`
+refuses any status that disagrees with its contents.
+*Changes:* when a function can end in several ways, each way gets its
+own value, and "didn't happen" gets one too.
+
+**2. Decide a state from its source, not from its symptom.**
+My first idea was to call a day FLAT when the result came back empty.
+But a bug that dropped every check would also give an empty result, and
+it would be stored as "verified, nothing held". I traced one position
+through `check_entity_limit()`: every position gives a check or a
+NotChecked, so only a flat book can give an empty result. FLAT now
+comes from `today.is_flat`, and a mismatch either way raises, so the
+run fails instead of recording a refusal.
+*Changes:* before inferring a state, I ask what else could produce the
+same symptom. A bug is a failure, not a refusal.
+
+**3. If an input shapes a stored result, read it from a file.**
+Yesterday's MWPL only goes into a passive breach's reason text, but
+that text is stored. Reading it from the store would have made D's rows
+depend on whether D-1 had been run, so a re-run could change with no
+input changed. Reading `combineoi(D-1)` keeps the result tied to
+checksummed files, the way row 6 reads `delta(D-1)`.
+*Changes:* the same input files must always give the same stored rows,
+whatever order the days were run in.
+
+**4. A catch should only cover what its reason names.**
+`load_delta_factors()` sat inside the `try` whose reason is "position in
+unknown account". Any ReferenceDataError from it would have been
+stored under a reason that wasn't true. I moved it out. For the same
+reason, the no-MWPL wording now checks the engine's `NO_MWPL_REASON`
+constant, and any other not-checked reason fails the run rather than
+being stored under the wrong words.
+*Changes:* each `try` wraps exactly the call its reason describes.
+
+**5. Recorded is not compared.**
+#019 item 11 said a changed input is refused, naming the file. The
+runner records input checksums but never compares them; the re-run rule
+only compares results. So a changed input that leaves results the same
+passes silently, and a day re-run from "refused" to "computed" keeps its
+old refusal beside its new checks. The decision promised more than the
+code did, and nobody had checked.
+*Changes:* for every guarantee in DECISIONS, I find the line of code
+that enforces it. If there isn't one, I correct the decision.
+
+**6. Mutation testing checks the tests, not just the code.**
+The first mutation pass killed 20 of 31. All 11 survivors were missing
+tests, not bugs: my stage only ever built valid outcomes, so deleting
+any of `Row7Outcome`'s eight checks went unnoticed. The window's MWPL
+was the same every day, so reading yesterday's figure from today's
+file passed too. The fix was tests that build invalid outcomes directly
+and a D-1 MWPL that differs. The final pass killed 33 of 33.
+*Changes:* a check that the normal path never triggers needs its own
+test that does.
+
 ## Gaps list
 Questions from teach-backs that need more work. Strike them out once you can answer them
 without notes.
