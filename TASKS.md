@@ -170,6 +170,16 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
 
 - [ ] Week 2 (Thu 5 to Wed 11 Nov): reliable data, reconciliation, runner, **v0.1**
 - [ ] Week 3 (Thu 12 to Wed 18 Nov): limit engine, data quality, circular watcher
+  - [x] **Row 7 in the runner and the report**, 12 Nov (`b4754f2`, #022): my
+    `_entity_limit_stage()` and `Row7Outcome`; Claude's plumbing, report section 4 and tests.
+    604 tests, 33 of 33 mutants killed. Samples re-rendered (`57ecd85`)
+  - [ ] **#023 `stage_ran`**, next, in a fresh session: a marker per stage per day, written from
+    the stage's own outcome, for row 6 and row 7, so a flat day and a run from before the stage
+    stop looking the same
+  - [ ] **Finish row 7's docs before the public rebuild:** `SPEC.md` row 7's status, and the
+    README's prop-book bullet ("not the check itself") and report order, which still miss row 7
+  - [ ] Deltas by Path B (#021 item 3): Claude's file reader and comparison harness, then my
+    Black-76
 - [ ] Week 4 (Thu 19 to Wed 25 Nov): validation against NSE, entity limits, alerts
 - [ ] Week 5 (Thu 26 Nov to Wed 2 Dec): OTR, reports, live page, **v1.0**
   - [ ] **Supersede, for re-runs** (`DECISIONS.md` #022 correction). Two gaps found 12 Nov: a

@@ -438,12 +438,32 @@ computed by me rather than read as published, and row 7.
 - **Pushed:** up to `8390691` only. The later commits are local. The public rebuild waits until
   row 7 is wired in and the docs are updated.
 
-**Next:** write the runner's row 7 stage: load the book start and the reference data, choose
-`NoPriorDay` or a refusal by the start date, catch `ReferenceDataError` in its two places, record
-one ROW7 refusal per no-MWPL scrip with the count, and call `store.record_row7()` inside the day's
-transaction. Then Claude adds `book.yaml` to `input_checksums()` and the report's row 7 section.
-After that, deltas: Claude's file reader and comparison harness, then my Black-76.
+**Later on 12 Nov: row 7 in the runner and the report** (`b4754f2`, #022).
+- **My stage:** `_entity_limit_stage()` returns a `Row7Outcome` - CHECKED, FLAT or REFUSED, its
+  result and its own refusals - and `DayResults.row7` is None when it did not run. FLAT comes from
+  the book, never from an empty result. `__post_init__` refuses an outcome that disagrees with
+  itself. Three review fixes before the commit: the factors load outside the "unknown account"
+  `try`; the engine's one not-checked reason is `NO_MWPL_REASON`, and any other fails the run;
+  the comments renumbered.
+- **Claude's part:** `RunPaths.holders()` and `accounts()`, beside the positions file; `book.yaml`,
+  both reference tables and `combineoi(D-1)` in `input_checksums()`; row 7 as report section 4,
+  with "Refused", the breaches, the scrips not checked and who they affected, and for nothing
+  stored "Nothing checked, and no refusal recorded", never "0 breaches"; the tests, written first.
+- **Tested:** 604 pass. The mutation check killed 33 of 33. Its first pass killed 20 of 31, and all
+  11 survivors were gaps in Claude's tests, not my code: no direct test of `Row7Outcome`, a window
+  whose MWPL never changes, no day with two no-MWPL scrips.
+- **Samples re-rendered** at the clean commit (`57ecd85`): row 7 refused, missing the book files.
+- **Found on the way** (#022 correction): #019 item 11 says a changed input refuses, but only
+  results are compared; and a re-run from refused to computed leaves both on the day, row 6 too.
+  Waits for v1.0's supersede (TASKS, Week 5). The replay re-run waits for that and `data/book/`.
+- **Pushed:** still only up to `8390691`.
 
-**Still owed by me:** today's `LEARNING.md` entry (the mutant killed by a safety check), the
-application paragraph with the year's numbers, and the `PLAN.md` tick list, which is behind
-(runner, v0.1, README, row 7).
+**Next:** #023, `stage_ran`, in a fresh session: one marker per stage per day, written from the
+stage's own outcome (row 6 and row 7), never unconditionally in `write_day()`. Row 6's `()` for
+refused, flat and not run has to become an outcome first. Then row 7's docs (SPEC row 7, the
+README's prop-book bullet and report order) before the public rebuild, and after that deltas:
+Claude's file reader and comparison harness, then my Black-76.
+
+**Still owed by me:** today's `LEARNING.md` entry (the mutant killed by a safety check, and that
+a value meaning "not run" must differ from every outcome), the application paragraph with the
+year's numbers, and the `PLAN.md` tick list, which is behind (runner, v0.1, README, row 7).

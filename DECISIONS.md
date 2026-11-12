@@ -1573,11 +1573,27 @@ covered, and the time goes to the replay and row 7.
      held nothing that day, or this run predates row 7." Every run before row 7 looks like
      this, and so does a flat day, so the report says both rather than "0 breaches".
 
-- **Open:** whether row 7 should record that it ran, so that a flat day and a run from before
-  row 7 stop looking the same (follow-up 4a). Until then, state 5's third case stays two-way.
-- **Outcome:** accepted, 12 Nov 2026. Plumbing and report built; the runner's row 7 stage is
-  mine, against the tests in `tests/test_runner_row7.py`. The sample reports are re-rendered
-  once the stage is committed, so their footer names a clean commit.
+- **Open, decided as #023 next:** row 7 and row 6 record that they ran, in a `stage_ran` table
+  written from the stage's own outcome (CHECKED, FLAT or REFUSED), never unconditionally in
+  `write_day()`, so that a flat day and a run from before row 7 stop looking the same
+  (follow-up 4a). Until then, state 5's third case stays two-way.
+- **Outcome:** accepted, 12 Nov 2026, and done the same day.
+  * The runner's row 7 stage is mine (`b4754f2`): `_entity_limit_stage()` returns a
+    `Row7Outcome` - status CHECKED, FLAT or REFUSED, its result, and its own refusals - and
+    `DayResults.row7` is None when the stage did not run. `__post_init__` refuses an outcome
+    that disagrees with itself. FLAT comes from the book, never from an empty result: a book
+    with positions and no entries, or a flat book with entries, fails the run.
+  * Three review fixes before the commit, all mine: the delta factors load outside the `try`
+    whose reason is "position in unknown account"; the engine names its one not-checked reason
+    as `NO_MWPL_REASON`, and the stage fails on any other rather than store it under the wrong
+    wording; `__post_init__`'s comments renumbered.
+  * Evidence: 604 tests pass, 53 of them row 7's in the runner. Claude's mutation check killed
+    33 of 33 mutants, after a first pass at 20 of 31 found 11 gaps in Claude's tests, none in
+    my code: `Row7Outcome`'s invariants had no direct test, the window's MWPL never changes from
+    day to day, no day had two no-MWPL scrips, and no reference failure was anything but a
+    `ReferenceDataError`.
+  * The sample reports are re-rendered at the clean commit (`57ecd85`); row 7 shows as
+    "Refused", missing the book files, beside row 6.
 
 - **Correction to #019 item 11, found 12 Nov 2026 while answering follow-up 4b.** Item 11 says
   "a changed input refuses, naming the file and both checksums". The code does not do that.
