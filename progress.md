@@ -467,3 +467,41 @@ Claude's file reader and comparison harness, then my Black-76.
 **Still owed by me:** today's `LEARNING.md` entry (the mutant killed by a safety check, and that
 a value meaning "not run" must differ from every outcome), the application paragraph with the
 year's numbers, and the `PLAN.md` tick list, which is behind (runner, v0.1, README, row 7).
+
+## 13 Nov 2026 (Fri): Week 3 Day 2, #023 stage_ran
+
+- **#023 decided** (my answers to five questions, then four corrections found against the code).
+  Each of row 6 and row 7 writes one `stage_ran` marker per day, from its own outcome (CHECKED,
+  FLAT or REFUSED), never unconditionally. FLAT means every book the stage *checks* is flat:
+  today's for row 7, both days' for row 6. Row 6's CHECKED may be empty, row 7's may not. One
+  shared `StageStatus`, two outcome types. A re-run that changes a status fails loudly. Rows
+  with no marker are "Inconsistent", not old. The report checks the store by rebuilding the
+  outcome types.
+- **Corrections from the check against the code:** row 7 reads yesterday's book but only to name
+  a cause, so "reads" became "checks"; the 273 replay days are in no store (`data/store/` is
+  empty), so there is no old record to protect; item 8's hand-kept list of contradictions became
+  one rule; and FLAT needs the stage's inputs first (a flat day with no ban list is REFUSED).
+- **Mine** (`d7ff95c`): `Row6Outcome` with its `__post_init__`, `_row6()` returning it (inputs
+  first, the check called before FLAT is decided, a flat pair with checks fails the run),
+  `DayResults.row6` in place of `row6_checks`, and `write_day()` writing the markers first, from
+  each outcome.
+- **Claude's part** (`d7ff95c`): `Row7Status` renamed `StageStatus` and moved to `store.py`; the
+  `stage_ran` table, `record_stage_ran()` (naming the stage and both statuses on a change) and
+  `stages_ran()`; a store with a run log and no `stage_ran` refused at open, before the schema
+  runs; the report's `_rebuild()`, with "Not run", "Nothing held" and "Inconsistent:" in
+  sections 1, 3 and 4. Tests written first: 28 store, 41 runner, 16 report.
+- **Tested:** 689 pass. The mutation check killed 28 of 30 mutants of my code. The two survivors
+  are redundant on purpose and no test can see them today: writing the markers after the rows
+  (no other table conflicts first on a status change, so the marker fails with the same message
+  either way; the reason for markers-first is in `write_day()`'s docstring), and writing row 6's
+  checks whatever the status (FLAT holds `()` and REFUSED holds None, so `row6.checks` is already
+  false on both).
+- **The lesson:** the other side of yesterday's. A mutant can survive because the code is
+  redundant on purpose, not because a test is weak. Knowing which is the point of the check.
+- **Samples not re-rendered:** only their footers would change, since both sample days refuse
+  row 6 and row 7 and that text is unchanged.
+- **Pushed:** up to `c4f010e` (12 Nov's work). `d7ff95c` and this entry are local.
+
+**Next:** row 7's docs, in a fresh session: the README's prop-book bullet and report order, and
+`SPEC.md` row 7's status. Then the public rebuild, then deltas (Claude's file reader and
+comparison harness, then my Black-76).
