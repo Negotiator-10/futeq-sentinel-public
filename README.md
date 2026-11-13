@@ -86,11 +86,13 @@ resets, with a note that one year of evidence is to be re-checked each quarter.
 
 Stated plainly, because the thing above is the only claim I want read as finished.
 
-* **The prop book is checked against one rule of four.** The book itself exists - positions
-  keyed on the account `(tm, ucc)`, with a written-down marker for a flat day - and SPEC row 6,
-  that trading in a banned scrip must reduce FutEq OI, is checked and reproduces SEBI's own
-  worked example. It has run on synthetic books only, never a real one. Row 7, the entity
-  limits, has its holder and account reference tables but not the check itself.
+* **The prop book is checked against two rules, on synthetic books only.** The book itself
+  exists - positions keyed on the account `(tm, ucc)`, with a written-down marker for a flat
+  day. SPEC row 6, that trading in a banned scrip must reduce FutEq OI, is checked and
+  reproduces SEBI's own worked example. SPEC row 7, the entity limits of para 5.8.1, is checked
+  too: each holder's gross FutEq per scrip against its category's limit, and each trading
+  member's 20% and 30%, with every breach labelled active, passive or unknown. Neither has run
+  on a real book.
 * **Not covered, by decision (`DECISIONS.md` #020).** The index-derivative limits - SPEC rows 8,
   9, 10, 13, 14 and 16, for index options and futures at end of day and intraday - are specified
   in `SPEC.md` and `config/rules.yaml` and not written. Row 15, intraday MWPL monitoring for
@@ -111,8 +113,10 @@ Stated plainly, because the thing above is the only claim I want read as finishe
 * **A missing prior state has only been run on synthetic files.** Every real scored day had its
   seed. The runner's handling of a missing ban list — refusing only the in-band forecasts, D-1's
   score and row 6 — is tested on the synthetic window, not on a real gap.
-* **Row 6 has never run inside a real day.** The runner has run every one of the 273 sessions,
-  and on each row 6 refuses: there is no prop book and no `Contract_Delta` file. The report says
+* **Rows 6 and 7 have never run inside a real day.** The runner has run every one of the 273
+  sessions, and on each row 6 refuses: there is no prop book, and a `Contract_Delta` file for one
+  day only. Row 7 was added after that replay, so it is not in its results; with no
+  `data/book/`, it refuses on every real day for the missing book files. The report says
   "Refused", not "0 breaches".
 * **Acquisition is manual, and will stay manual.** NSE's terms of use (para 9) prohibit systematic
   or automated data collection, and the main site offers no consent route, so I download every
@@ -131,7 +135,7 @@ Python 3.12.
 
 ```
 pip install -e ".[dev]"
-pytest                        # 475 tests; 34 skip without NSE's files in data/
+pytest                        # 689 tests; 34 skip without NSE's files in data/
 python scripts/score_bans.py  # reproduces the full score from the files in data/
 ```
 
@@ -162,8 +166,10 @@ python -m sentinel.report 2026-11-04    # writes reports/2026-11-04.md from the 
 
 The runner reads that day's files from `data/`, computes the whole day in memory and writes it to
 the store in one transaction: NSE's measurements, the reconciliation, the day's official ban
-state, the forecast for the next trading day, and row 6. A crash leaves nothing of the day
-behind. A run log outside that transaction records every run — its input checksums, the commit
+state, the forecast for the next trading day, row 6 and row 7. Rows 6 and 7 each also store a
+marker of the outcome they reached - checked, flat or refused (`DECISIONS.md` #023) - so a flat
+book, a refusal and a stage that never ran are three different records. A crash leaves nothing
+of the day behind. A run log outside that transaction records every run — its input checksums, the commit
 and whether the working tree was clean, the rules and calendar checksums, and which rules it used
 on an assumption — so even a failed run says what it was and why it failed.
 
@@ -173,10 +179,12 @@ list refuses only what depends on it, and the rest of the day still runs. Every 
 with its reason, so "refused" and "not run" are never the same record.
 
 The report is rendered from the store and the run log alone, in a fixed order: refusals, where
-the engine disagrees with NSE's own flag, row 6 breaches, tomorrow's ban, the 80–95% watchlist
-with each scrip's distance to the line that applies to it, the checks that passed, and an audit
-footer. A refused section says "Refused" and why. A run from uncommitted code is marked "not
-reproducible".
+the engine disagrees with NSE's own flag, row 6 breaches, row 7's entity-limit breaches with
+their limit, excess and cause, tomorrow's ban, the 80–95% watchlist with each scrip's distance
+to the line that applies to it, the checks that passed, and an audit footer. A refused section
+says "Refused" and why. For rows 6 and 7, a day with no marker says "Not run", and one whose
+stored rows disagree with its marker says "Inconsistent" and why, without choosing a side; the
+rest of the report still renders. A run from uncommitted code is marked "not reproducible".
 
 Two sample reports are in `docs/sample_reports/`: an ordinary day, and a day whose ban list is
 missing. Both are rendered from the synthetic window by `scripts/render_sample_reports.py`, never
@@ -190,8 +198,8 @@ this repository.
 | `src/sentinel/parsers.py` | reads NSE's files, computes nothing |
 | `src/sentinel/rules.py` | loads every threshold with its source, and refuses the ones the circulars leave to the exchange |
 | `src/sentinel/calendar.py` | which dates NSE traded on, with `UNKNOWN` as a state rather than an assumption |
-| `src/sentinel/engine.py` | utilisation, headroom, ban state, reconciliation |
-| `src/sentinel/store.py` | point-in-time ban state, keyed on ISIN and date |
+| `src/sentinel/engine.py` | utilisation, headroom, ban state, reconciliation, and the row 6 and row 7 checks |
+| `src/sentinel/store.py` | point-in-time ban state, keyed on ISIN and date, and each run's log, results and stage markers |
 | `src/sentinel/ingest.py` | loads published files into the store; a re-run is a no-op |
 | `src/sentinel/book.py` | the synthetic prop book: positions keyed on `(tm, ucc)`, and a flat day as a marker row |
 | `src/sentinel/entities.py` | who holds which account, date-effective, for the entity limits |
