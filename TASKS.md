@@ -180,10 +180,15 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
   - [x] **Finish row 7's docs before the public rebuild**, 13 Nov (`3ccddbd`, `43c5e31`):
     `SPEC.md` row 7's status and tests, the README's prop-book bullet and report order, and SPEC
     row 6's test names
-  - [ ] **SPEC's test names, before the public rebuild** (found 13 Nov; not today). 16 tests SPEC
-    quotes are for functions not written: mark each "Planned: <function> not written", as row 1
-    now is. Row 4's `test_ban_entry_is_eod_only` does not exist although `is_in_ban()` does: name
-    the real `is_in_ban()` tests instead, checked against `tests/`
+  - [x] **SPEC's test names, before the public rebuild**, 13 Nov. The 16 tests SPEC quotes for
+    functions not written are marked "Planned: <function> not written", with "cut from v1.0 by
+    #020" on rows 8, 9, 10 and 13 to 16. Row 4 names the real `is_in_ban()` tests in
+    `tests/test_engine.py`, and says why "end of day only" has no test. SPEC's Unknowns and the
+    `rules.yaml` note on `recalculation_months` now say the reset months are observed
+  - [ ] **One test name, one test** (found 13 Nov; not today). `test_ban_entry_is_strictly_greater`
+    and `test_ban_exit_is_inclusive` in `tests/test_rules_loader.py` check the config and share
+    their names with `tests/test_engine.py`'s `is_in_ban()` tests. Rename the config tests so each
+    name means one test, then drop SPEC row 4's note about the namesake
   - [ ] Deltas by Path B (#021 item 3): Claude's file reader and comparison harness, then my
     Black-76
 - [ ] Week 4 (Thu 19 to Wed 25 Nov): validation against NSE, entity limits, alerts

@@ -81,7 +81,7 @@ single_stock:
       value: 3
       source: "SEBI/HO/MRD/TPD-1/P/CIR/2025/79 para 5.2.4"
       verified: 2026-10-31
-      note: "Rolling ADDV over the preceding three months. The circular names no reset MONTHS, so reset_calendar below is an assumption, not a citation."
+      note: "Rolling ADDV over the preceding three months. The circular names no reset MONTHS, so reset_calendar below records the months [1, 4, 7, 10] as observed in the 1 Oct 2025 to 9 Nov 2026 replay, not cited. Its source lists the eight combineoi files either side of each reset."
     reset_calendar:
       value: [1, 4, 7, 10]
       verified: 2026-11-11

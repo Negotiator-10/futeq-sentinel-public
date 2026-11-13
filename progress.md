@@ -500,7 +500,7 @@ year's numbers, and the `PLAN.md` tick list, which is behind (runner, v0.1, READ
   redundant on purpose, not because a test is weak. Knowing which is the point of the check.
 - **Samples not re-rendered:** only their footers would change, since both sample days refuse
   row 6 and row 7 and that text is unchanged.
-- **Pushed:** up to `c4f010e` (12 Nov's work). `d7ff95c` and this entry are local.
+- **Pushed:** everything up to `116b208`, checked against `origin/main`.
 
 **Next:** row 7's docs, in a fresh session: the README's prop-book bullet and report order, and
 `SPEC.md` row 7's status. Then the public rebuild, then deltas (Claude's file reader and
