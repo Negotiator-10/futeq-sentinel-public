@@ -332,3 +332,10 @@ without notes.
   CHECKS rows in `docs/handcalcs/mwpl_by_hand.xlsx`)
 - What the ban-period penalty is counted per, in all three dimensions (Day 1 Q6)
 - Whether the Annexure 2 delta convention covers single stocks (`SPEC.md` row 11, UNVERIFIED)
+- "No breaches" has four states, not three (checked, flat, refused, not run), and a
+  checked day can still hold not-checked scrips. The marker proves an outcome was
+  reached, not that it's right.
+- Don't overclaim the re-run rule: changed inputs with unchanged results pass silently
+  (#022). Know exactly what goes stale after a supersede, and who approves one.
+- NSE publishes the ban list; my report's value is the reconciliation, the breaches
+  and the watchlist, not a time advantage.
