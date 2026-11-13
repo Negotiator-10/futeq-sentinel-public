@@ -1613,3 +1613,87 @@ covered, and the time goes to the replay and row 7.
   replay re-run is held until it does. The fix belongs with v1.0's supersede (item 11's
   "supersede and the stale-day cascade"), recorded in `TASKS.md` under Week 5. Until then, a
   day that moved from refused to computed is re-run into a fresh store.
+
+
+## #023: stage_ran, a marker that each stage reached an outcome, 13 Nov 2026
+<!-- Authorship. What FLAT means for each stage, whether row 6's CHECKED may be empty, one
+     shared status with two outcome types, the loud re-run conflict, treating rows with no
+     marker as inconsistent, and checking the store by rebuilding the outcome types are mine,
+     given on 13 Nov to five questions Claude raised and four corrections Claude found when it
+     checked my first draft against runner.py, engine.py, store.py and report.py. Claude builds
+     the table, its writer and reader, the report change and the tests. -->
+
+A stage that leaves nothing in the store could have found a flat book, been skipped by a bug,
+or never been run. All three look the same. Absence is not a statement (#015), so each stage
+now records the outcome it reached. This settles #022's open point and its follow-up 4a.
+
+1. **The marker.** `stage_ran(trade_date, stage, status, run_id, written_at)`, primary key
+   `(trade_date, stage)`, written inside the day's transaction. `stage` is 'row6' or 'row7' and
+   `status` is 'checked', 'flat' or 'refused', each held by a CHECK. It stores no counts: they
+   can be worked out from the check and refusal tables, and nothing derived is stored beside
+   its inputs. `run_id` is not compared, so a clean re-run is a no-op.
+
+2. **The marker comes from the stage's own outcome,** never written unconditionally by
+   `write_day()`. Written for every day, it would only prove the code had the stage; a stage
+   skipped by a bug must leave no marker.
+
+3. **FLAT means every book the stage checks is flat,** decided from the books, never from an
+   empty result. A book the stage only reads to explain a result does not count.
+   * Row 7 checks today's holdings; yesterday's book only names a breach's cause. So FLAT is
+     `today.is_flat`. Test case: D flat after a D-1 with positions is FLAT.
+   * Row 6 checks the change between yesterday's and today's books, so FLAT is both flat.
+     "Today is flat" would be wrong: a flat D after a D-1 that held a banned scrip gives real
+     checks, each a close-out. Test case: D-1 held only non-banned scrips and D is flat, which
+     is CHECKED with zero checks, because D-1 was not flat and nothing banned was held.
+   * FLAT needs the stage's inputs first. A stage that refuses for a missing input is REFUSED
+     even when its books are flat: row 6 refuses for a missing ban list before it looks at the
+     books, so a flat day with no ban list is REFUSED.
+   * A flat stage whose check returns any entry is a bug, and the run fails.
+
+4. **Row 6's CHECKED may be empty; row 7's may not.** `_row6()` returns `()` in four cases:
+   refused, both books flat, no account holding a banned scrip, and nothing banned on D. The
+   last two are ordinary days. Row 6 checks only banned scrips, so an empty CHECKED is normal,
+   and it stores a marker with no check rows. Row 7 checks every scrip held, so a book with
+   positions always gives entries, and an empty result there is a bug.
+
+5. **One shared status, two outcome types.** `Row7Status` is renamed `StageStatus` (CHECKED,
+   FLAT, REFUSED), and the marker's `status` column uses its values. Row 6 gets its own
+   `Row6Outcome(trade_date, status, checks, refusals=())`, with
+   `checks: tuple[ReductionCheck, ...] | None`:
+   * REFUSED: `checks` is None, and there is exactly one whole-stage ROW6 refusal.
+   * FLAT: `checks` is `()`, with no refusals.
+   * CHECKED: `checks` is a tuple, empty allowed, with no refusals. Row 6 has no per-scrip
+     refusals.
+   * Every refusal is ROW6 and dated `trade_date`; every check is dated `trade_date`.
+
+   One type for both would need `__post_init__` to branch on which stage it is, which is two
+   types under one name. The results differ (a tuple of `ReductionCheck` against an
+   `EntityLimitResult`), row 7's CHECKED needs one refusal per no-MWPL scrip and row 6's has
+   none, and the empty-CHECKED rule differs. `DayResults.row6: Row6Outcome | None = None`
+   replaces `row6_checks`, and None means "not run", as for row 7.
+
+6. **A re-run that changes a stage's status fails loudly.** Moving from refused to checked
+   conflicts on `stage_ran` and rolls the day back. The marker's writer reads the stored status
+   itself, so the error names the stage and both statuses, for example "row6 was refused, now
+   checked", and says to re-run into a fresh store until v1.0's supersede exists. This turns
+   #022's "both on the day" hole from silent to loud.
+
+7. **Rows with no marker are inconsistent, not old.** No store holds days from before #023:
+   `data/store/` is empty, the replay ran into a temporary store, and a store from before 12
+   Nov is refused at open because its `refusal` CHECK has no 'row7' (`5738320`). So the case an
+   "older record" label would protect does not exist, while the bug it would hide could: a
+   stage that wrote its rows and skipped its marker. In the report:
+   * No marker and no rows: "Not run: no record that this stage ran."
+   * No marker but rows: "Inconsistent", like any other contradiction.
+   * A store found to hold such days is moved aside and its days re-run, the same remedy as
+     the store's two other old formats.
+
+8. **The store is checked by rebuilding the outcome.** For each stage with a marker, the reader
+   rebuilds `Row6Outcome` or `Row7Outcome` from the marker, the stage's rows and its refusals.
+   If `__post_init__` refuses, its message is the "Inconsistent:" text. The invariants live in
+   one place, the outcome types, so the report cannot drift from them, and no list of
+   contradictions has to be kept by hand. The report shows the contradiction, names what
+   disagrees, and lists it at the top with the refusals. It never picks a side, and it does not
+   stop: tomorrow's ban list must still render on the day the store is wrong.
+
+- **Outcome:** accepted, 13 Nov 2026.

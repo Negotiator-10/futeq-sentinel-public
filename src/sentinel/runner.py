@@ -28,7 +28,6 @@ import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 
 from sentinel.book import (
@@ -38,14 +37,14 @@ from sentinel.calendar import (
     ChainUnverifiedError, DayKind, UnknownDateError, load_calendar,
 )
 from sentinel.engine import (
-    NO_MWPL_REASON, EntityLimitResult, check_ban_period_reduction, check_entity_limit,
-    is_in_ban, reconcile,
+    NO_MWPL_REASON, EntityLimitResult, ReductionCheck, check_ban_period_reduction,
+    check_entity_limit, is_in_ban, reconcile,
 )
 from sentinel.entities import ReferenceDataError, load_reference
 from sentinel.parsers import parse_ban_list, parse_mwpl_file
 from sentinel.rules import load_rules
 from sentinel.runlock import RunInProgressError, RunLock
-from sentinel.store import BanStateStore, Refusal, RefusalStage, RunOutcome
+from sentinel.store import BanStateStore, Refusal, RefusalStage, RunOutcome, StageStatus
 
 # Anchored to the repo, like DEFAULT_CALENDAR_PATH, so the runner works from
 # any working directory. runner.py lives at src/sentinel/runner.py.
@@ -115,12 +114,87 @@ class RunRefused(Exception):
     """The whole run cannot proceed. Carries the reason for the run log."""
 
 
-class Row7Status(Enum):
-    """What the row 7 stage reached. "Not run" is not a status: it is DayResults.row7 being None."""
+# StageStatus (CHECKED, FLAT, REFUSED) lives in sentinel.store beside RefusalStage, because
+# the stage_ran marker's table holds its values (#023). Imported above, so runner.StageStatus works.
 
-    CHECKED = "checked"    # the result holds checks and/or not-checked entries
-    FLAT = "flat"          # today's book is PropBook.flat(): verified that nothing was held
-    REFUSED = "refused"    # the whole stage refused; there is no result
+
+@dataclass(frozen=True)
+class Row6Outcome:
+    """The row 6 stage's outcome for one day, carrying its own refusal (#023 item 5).
+
+    Differs from Row7Outcome where the stages differ: the result is a tuple of ReductionCheck,
+    CHECKED may be empty (no banned scrip, or none held, is an ordinary day), and row 6 has no
+    per-scrip refusals. FLAT means both books were flat, because row 6 checks the change
+    between them. It carries its date because a FLAT or empty CHECKED outcome has nothing else
+    in it that says which day it is for (#015).
+    """
+
+    trade_date: dt.date
+    status: StageStatus
+    checks: tuple[ReductionCheck, ...] | None
+    refusals: tuple[Refusal, ...] = ()
+
+    def __post_init__(self) -> None:
+        day = self.trade_date
+        where = f"row 6 outcome for {day} ({getattr(self.status, 'value', self.status)})"
+
+        # 1. Types. A list inside a frozen dataclass could still be changed.
+        if not isinstance(self.status, StageStatus):
+            raise TypeError(f"{where}: status must be a StageStatus, not {type(self.status).__name__}")
+        if not isinstance(self.refusals, tuple):
+            raise TypeError(f"{where}: refusals must be a tuple, not {type(self.refusals).__name__}")
+        for r in self.refusals:
+            if not isinstance(r, Refusal):
+                raise TypeError(f"{where}: refusals holds a {type(r).__name__}, not a Refusal")
+        if self.checks is not None:
+            if not isinstance(self.checks, tuple):
+                raise TypeError(f"{where}: checks must be a tuple or None, "
+                                f"not {type(self.checks).__name__}")
+            for c in self.checks:
+                if not isinstance(c, ReductionCheck):
+                    raise TypeError(f"{where}: checks holds a {type(c).__name__}, "
+                                    f"not a ReductionCheck")
+
+        # 2. Every refusal belongs to row 6 and to this day.
+        for r in self.refusals:
+            if r.stage is not RefusalStage.ROW6:
+                raise ValueError(f"{where}: a {r.stage.value} refusal does not belong to row 6")
+            if r.trade_date != day:
+                raise ValueError(f"{where}: a refusal is dated {r.trade_date}")
+
+        # 3. Every check is for this day.
+        if self.checks is not None:
+            dates = {c.trade_date for c in self.checks}
+            if dates - {day}:
+                raise ValueError(f"{where}: checks are dated {sorted(dates)}")
+
+        # 4. REFUSED: no checks at all, and exactly one whole-stage refusal.
+        if self.status is StageStatus.REFUSED:
+            if self.checks is not None:
+                raise ValueError(f"{where}: a refused stage has no checks, not even an empty tuple")
+            if len(self.refusals) != 1 or self.refusals[0].subject != "":
+                raise ValueError(
+                    f"{where}: needs exactly one whole-stage refusal (subject \"\"), "
+                    f"got {[r.subject for r in self.refusals]}")
+
+        # 5. FLAT: an empty tuple of checks and no refusals. Both books held nothing.
+        elif self.status is StageStatus.FLAT:
+            if self.checks is None:
+                raise ValueError(f"{where}: a flat stage ran its check; its checks are (), not None")
+            if self.checks:
+                raise ValueError(f"{where}: a flat day has {len(self.checks)} check(s); "
+                                 f"it must have none")
+            if self.refusals:
+                raise ValueError(f"{where}: a flat day has {len(self.refusals)} refusal(s)")
+
+        # 6. CHECKED: a tuple, empty allowed (#023 item 4), and no refusals: row 6 has no
+        #    per-scrip refusals, and a whole-stage refusal is REFUSED.
+        else:
+            if self.checks is None:
+                raise ValueError(f"{where}: a checked stage needs its checks, even if ()")
+            if self.refusals:
+                raise ValueError(f"{where}: a checked stage carries no refusals, "
+                                 f"got {[r.subject for r in self.refusals]}")
 
 
 @dataclass(frozen=True)
@@ -133,7 +207,7 @@ class Row7Outcome:
     """
 
     trade_date: dt.date
-    status: Row7Status
+    status: StageStatus
     result: EntityLimitResult | None
     refusals: tuple[Refusal, ...] = ()
 
@@ -142,8 +216,8 @@ class Row7Outcome:
         where = f"row 7 outcome for {day} ({getattr(self.status, 'value', self.status)})"
 
         # 1. Types. A list inside a frozen dataclass could still be changed.
-        if not isinstance(self.status, Row7Status):
-            raise TypeError(f"{where}: status must be a Row7Status, not {type(self.status).__name__}")
+        if not isinstance(self.status, StageStatus):
+            raise TypeError(f"{where}: status must be a StageStatus, not {type(self.status).__name__}")
         if not isinstance(self.refusals, tuple):
             raise TypeError(f"{where}: refusals must be a tuple, not {type(self.refusals).__name__}")
         for r in self.refusals:
@@ -171,7 +245,7 @@ class Row7Outcome:
         whole_stage = [r for r in self.refusals if r.subject == ""]
 
         # 4. REFUSED: exactly one whole-stage refusal, and no result.
-        if self.status is Row7Status.REFUSED:
+        if self.status is StageStatus.REFUSED:
             if self.result is not None:
                 raise ValueError(f"{where}: a refused stage has no result")
             if len(self.refusals) != 1 or len(whole_stage) != 1:
@@ -180,7 +254,7 @@ class Row7Outcome:
                     f"got {len(self.refusals)} refusal(s), {len(whole_stage)} whole-stage")
 
         # 5. FLAT: an empty result and no refusals. Nothing was held, so nothing was refused.
-        elif self.status is Row7Status.FLAT:
+        elif self.status is StageStatus.FLAT:
             if self.result is None:
                 raise ValueError(f"{where}: a flat day still has a result, an empty one")
             if self.result.checks or self.result.not_checked:
@@ -223,7 +297,7 @@ class DayResults:
     official: dict[str, tuple[str, bool]] | None = None    # ISIN -> (symbol, in_ban)
     next_day: dt.date | None = None                        # None = forecast refused
     forecasts: dict[str, tuple[str, bool]] = field(default_factory=dict)
-    row6_checks: tuple = ()
+    row6: Row6Outcome | None = None                        # None = not run (#023)
     refusals: list[Refusal] = field(default_factory=list)
     row7: Row7Outcome | None = None                        # None = not run
 
@@ -361,21 +435,24 @@ def compute_day(paths: RunPaths, day: dt.date, calendar, rules) -> DayResults:
                     day, RefusalStage.FORECAST, r.isin,
                     "in-band scrip and D's official state is missing"))
 
-    # 5. Row 6.
-    results.row6_checks = _row6(paths, day, calendar, rules, official_banned,
-                                symbol_for_isin, results.refusals)
+    # 5. Row 6. Its refusal travels in its outcome, as row 7's do, not in results.refusals.
+    results.row6 = _row6(paths, day, calendar, rules, official_banned, symbol_for_isin)
 
     # 6. Row 7.
     results.row7 = _entity_limit_stage(paths, day, calendar, rules, rows, symbol_for_isin)
     return results
 
 
-def _row6(paths, day, calendar, rules, official_banned,
-          symbol_for_isin, refusals) -> tuple:
-    """Run the row 6 check, or record why it can't. Never raises for a gap."""
-    def refuse(reason: str) -> tuple:
-        refusals.append(Refusal(day, RefusalStage.ROW6, "", reason))
-        return ()
+def _row6(paths, day, calendar, rules, official_banned, symbol_for_isin) -> Row6Outcome:
+    """Run the row 6 check, or say why it can't (#023). Never raises for a gap.
+
+    The inputs come first: a missing ban list refuses even on a flat day (item 3). FLAT is
+    decided after the check runs, so its date checks (yesterday is the previous trading day,
+    each book matches its factor file) still guard a flat day.
+    """
+    def refuse(reason: str) -> Row6Outcome:
+        return Row6Outcome(day, StageStatus.REFUSED, None,
+                           (Refusal(day, RefusalStage.ROW6, "", reason),))
 
     if official_banned is None:
         return refuse("D's official ban state is missing")
@@ -394,10 +471,11 @@ def _row6(paths, day, calendar, rules, official_banned,
     if absent:
         # Never books.get(): a missing day must not pass as flat (#015).
         return refuse("no prop book for " + ", ".join(absent))
+    today, yesterday = books[day], books[prev]
 
-    return check_ban_period_reduction(
-        today=books[day],
-        yesterday=books[prev],
+    checks = check_ban_period_reduction(
+        today=today,
+        yesterday=yesterday,
         factors_today=load_delta_factors(paths.delta(day)),
         factors_yesterday=load_delta_factors(paths.delta(prev)),
         symbol_for_isin=symbol_for_isin,
@@ -405,6 +483,18 @@ def _row6(paths, day, calendar, rules, official_banned,
         calendar=calendar,
         rules=rules,
     )
+
+    # FLAT comes from the books, never from an empty result: row 6 checks the change between
+    # yesterday and today, so both must be flat. A flat pair can hold no position in a banned
+    # scrip, so any check returned is a bug: raise, and the run ends FAILED.
+    if today.is_flat and yesterday.is_flat:
+        if checks:
+            raise RuntimeError(f"{day}: both books are flat, but row 6 returned "
+                               f"{len(checks)} check(s)")
+        return Row6Outcome(day, StageStatus.FLAT, ())
+
+    # Not flat: CHECKED, and an empty tuple is an ordinary day (#023 item 4).
+    return Row6Outcome(day, StageStatus.CHECKED, tuple(checks))
 
 
 FIRST_DAY_REASON = "first day of the book"
@@ -419,7 +509,7 @@ def _entity_limit_stage(paths, day, calendar, rules, rows, symbol_for_isin) -> R
     scrip that had no MWPL.
     """
     def refuse(reason: str) -> Row7Outcome:
-        return Row7Outcome(day, Row7Status.REFUSED, None,
+        return Row7Outcome(day, StageStatus.REFUSED, None,
                            (Refusal(day, RefusalStage.ROW7, "", reason),))
 
     # 1. The declared start decides whether there is a yesterday (addendum 2, point 2).
@@ -489,7 +579,7 @@ def _entity_limit_stage(paths, day, calendar, rules, rows, symbol_for_isin) -> R
     if today.is_flat:
         if not empty:
             raise RuntimeError(f"{day}: a flat book gave row 7 entries")
-        return Row7Outcome(day, Row7Status.FLAT, result)
+        return Row7Outcome(day, StageStatus.FLAT, result)
     if empty:
         raise RuntimeError(f"{day}: a book with positions gave row 7 no checks and no "
                            f"not-checked entries")
@@ -506,7 +596,7 @@ def _entity_limit_stage(paths, day, calendar, rules, rows, symbol_for_isin) -> R
         Refusal(day, RefusalStage.ROW7, isin,
                 f"no MWPL in today's combineoi; {n} check{'' if n == 1 else 's'} not made")
         for isin, n in sorted(per_scrip.items()))
-    return Row7Outcome(day, Row7Status.CHECKED, result, refusals)
+    return Row7Outcome(day, StageStatus.CHECKED, result, refusals)
 
 
 # ---------------------------------------------------------------- writing the day
@@ -514,11 +604,24 @@ def _entity_limit_stage(paths, day, calendar, rules, rows, symbol_for_isin) -> R
 def write_day(store: BanStateStore, day: dt.date, run_id: str,
               results: DayResults) -> None:
     """Write D's results in one transaction. A writer is called only when it
-    has something: an empty write raises by design (#019 decision 5)."""
-    row7 = results.row7
-    refusals = [*results.refusals, *(row7.refusals if row7 is not None else ())]
+    has something: an empty write raises by design (#019 decision 5).
+
+    Each stage's marker comes from its own outcome and is written only when the stage
+    reached one (#023 item 2): a stage that did not run has outcome None and leaves no
+    marker. Markers are written before the stages' rows, so a re-run that changed a stage's
+    status fails on the marker, with its stage-and-status message, before anything else."""
+    row6, row7 = results.row6, results.row7
+    refusals = [*results.refusals,
+                *(row6.refusals if row6 is not None else ()),
+                *(row7.refusals if row7 is not None else ())]
 
     with store.day_transaction(day, run_id):
+        # The markers first: a status that changed since the last run fails here, loudly.
+        if row6 is not None:
+            store.record_stage_ran(day, RefusalStage.ROW6, row6.status)
+        if row7 is not None:
+            store.record_stage_ran(day, RefusalStage.ROW7, row7.status)
+
         store.record_measurements(results.measurements,
                                   input_sha256=results.combineoi_sha256)
         store.record_reconciliation(results.reconciliation,
@@ -529,10 +632,13 @@ def write_day(store: BanStateStore, day: dt.date, run_id: str,
         if results.next_day is not None and results.forecasts:
             store.record_forecast(results.next_day, results.forecasts,
                                   input_sha256=results.combineoi_sha256)
-        if results.row6_checks:
-            store.record_row6_checks(results.row6_checks)
-        # Only CHECKED has a non-empty result; FLAT's is empty and record_row7() refuses it.
-        if row7 is not None and row7.status is Row7Status.CHECKED:
+        # Row 6: an empty CHECKED writes its marker and no rows; record_row6_checks()
+        # refuses an empty tuple.
+        if row6 is not None and row6.status is StageStatus.CHECKED and row6.checks:
+            store.record_row6_checks(row6.checks)
+        # Row 7: only CHECKED has a non-empty result; FLAT's is empty and record_row7()
+        # refuses it.
+        if row7 is not None and row7.status is StageStatus.CHECKED:
             store.record_row7(row7.result)
         if refusals:
             store.record_refusals(refusals)

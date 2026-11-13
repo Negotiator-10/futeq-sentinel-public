@@ -33,7 +33,7 @@ from sentinel import runner
 from sentinel.book import BookError
 from sentinel.engine import EntityLimitCheck, EntityLimitResult, LimitCause, NotChecked
 from sentinel.entities import TM_COMBINED_LIMIT_KEY, Category, ReferenceDataError
-from sentinel.runner import Row7Outcome, Row7Status, RunPaths
+from sentinel.runner import Row7Outcome, StageStatus, RunPaths
 from sentinel.store import Refusal, RefusalStage, RunOutcome
 from tests.test_ingest import build_combineoi
 from tests.test_runner import (
@@ -474,10 +474,10 @@ EMPTY_RESULT = EntityLimitResult(())
 
 
 def test_the_three_valid_shapes_construct():
-    Row7Outcome(D13, Row7Status.REFUSED, None, (a_refusal(),))
-    Row7Outcome(D13, Row7Status.FLAT, EMPTY_RESULT)
-    Row7Outcome(D13, Row7Status.CHECKED, CHECKED_RESULT, (a_refusal(NO_MWPL),))
-    Row7Outcome(D13, Row7Status.CHECKED, EntityLimitResult((PASSED,)))
+    Row7Outcome(D13, StageStatus.REFUSED, None, (a_refusal(),))
+    Row7Outcome(D13, StageStatus.FLAT, EMPTY_RESULT)
+    Row7Outcome(D13, StageStatus.CHECKED, CHECKED_RESULT, (a_refusal(NO_MWPL),))
+    Row7Outcome(D13, StageStatus.CHECKED, EntityLimitResult((PASSED,)))
 
 
 @pytest.mark.parametrize("status,result,refusals,error,match", [
@@ -511,11 +511,11 @@ def test_the_three_valid_shapes_construct():
 ])
 def test_an_outcome_that_disagrees_with_itself_is_refused(status, result, refusals, error, match):
     with pytest.raises(error, match=match):
-        Row7Outcome(D13, Row7Status(status), result, refusals)
+        Row7Outcome(D13, StageStatus(status), result, refusals)
 
 
 def test_a_status_that_is_not_a_row7_status_is_refused():
-    with pytest.raises(TypeError, match="must be a Row7Status"):
+    with pytest.raises(TypeError, match="must be a StageStatus"):
         Row7Outcome(D13, "checked", CHECKED_RESULT, (a_refusal(NO_MWPL),))
 
 

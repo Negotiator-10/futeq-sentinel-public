@@ -21,6 +21,11 @@ Sections, in #019's order:
 A refused section says "Refused:" and why. It is never left out and never shown as zero: row 6
 or row 7 refused for want of a book is not "0 breaches".
 
+Rows 6 and 7 are read through their stage markers (#023). No marker and no rows is "Not run".
+A marker's rows are rebuilt into the stage's outcome type, `Row6Outcome` or `Row7Outcome`, and
+if it refuses them, or there are rows with no marker, the section says "Inconsistent:" with the
+reason, section 1 lists it, and the rest of the report still renders.
+
 Usage:  python -m sentinel.report 2026-11-04        writes reports/2026-11-04.md
 Exit codes: 0 written, 2 refused (D not run, or its run did not complete), 1 error.
 """
@@ -37,12 +42,12 @@ from enum import Enum
 from pathlib import Path
 
 from sentinel.calendar import ChainUnverifiedError, UnknownDateError, load_calendar
-from sentinel.engine import EntityLimitResult, headroom_shares, utilisation
+from sentinel.engine import headroom_shares, utilisation
 from sentinel.parsers import MwplRow
 from sentinel.rules import Rules, load_rules
-from sentinel.runner import REPO_ROOT, RunPaths
+from sentinel.runner import REPO_ROOT, Row6Outcome, Row7Outcome, RunPaths
 from sentinel.store import (
-    BanStateStore, Refusal, RefusalStage, RunOutcome, RunRecord,
+    BanStateStore, Refusal, RefusalStage, RunOutcome, RunRecord, StageStatus,
 )
 
 __all__ = [
@@ -250,6 +255,62 @@ def _report_run(store: BanStateStore, day: dt.date) -> RunRecord:
     )
 
 
+NOT_RUN = "Not run: no record that this stage ran."
+ROW6_FLAT = "Nothing held: the book was flat yesterday and today."
+ROW7_FLAT = "Nothing held: the book was flat today."
+ROW6_NONE_HELD = ("None: no account held a banned scrip yesterday or today, so there was "
+                  "nothing to check.")
+
+
+@dataclass(frozen=True)
+class StageView:
+    """What the store says about one marked stage on D (#023). Exactly one of three:
+    `outcome` set (the stage ran and its rows agree with its marker), `inconsistent` set (they
+    do not, or there are rows with no marker), or neither (not run)."""
+
+    stage: RefusalStage
+    outcome: Row6Outcome | Row7Outcome | None = None
+    inconsistent: str = ""
+
+
+def _rebuild(day: dt.date, stage: RefusalStage, status: StageStatus | None, rows,
+             refusals: tuple[Refusal, ...]) -> StageView:
+    """Rebuild a stage's outcome from its marker, its rows and its own refusals (#023 item 8).
+
+    `rows` is row 6's tuple of ReductionCheck or row 7's EntityLimitResult, as the store reads
+    them back. They are passed as they are, except that a REFUSED marker with no rows passes
+    None, which is what a refused outcome holds. Whatever the outcome type refuses is the
+    "Inconsistent:" text, so the invariants live in one place and the report cannot drift from
+    them. The report never picks a side: an inconsistent stage shows none of its rows."""
+    mine = tuple(r for r in refusals if r.stage is stage)
+    if stage is RefusalStage.ROW6:
+        count, outcome_type = len(rows), Row6Outcome
+    else:
+        count, outcome_type = len(rows.checks) + len(rows.not_checked), Row7Outcome
+    if status is None:
+        if count or mine:
+            return StageView(stage, inconsistent=(
+                f"no stage_ran marker, but {count} check row(s) and {len(mine)} refusal(s) "
+                f"are stored"))
+        return StageView(stage)
+    held = None if status is StageStatus.REFUSED and not count else rows
+    try:
+        return StageView(stage, outcome=outcome_type(day, status, held, mine))
+    except (TypeError, ValueError) as err:
+        return StageView(stage, inconsistent=str(err))
+
+
+def _not_settled(view: StageView) -> str | None:
+    """The line for a stage that did not reach a result to show, else None."""
+    if view.inconsistent:
+        return f"Inconsistent: {view.inconsistent}."
+    if view.outcome is None:
+        return NOT_RUN
+    if view.outcome.status is StageStatus.REFUSED:
+        return f"Refused: {view.outcome.refusals[0].reason}."
+    return None
+
+
 def render(day: dt.date, paths: RunPaths | None = None) -> str:
     """The report for D, as Markdown. Raises ReportRefused when there is nothing to report."""
     paths = paths or RunPaths.default()
@@ -276,11 +337,19 @@ def render(day: dt.date, paths: RunPaths | None = None) -> str:
                      {i: (s, f) for i, s, f, _o in store.scored_forecasts(next_day)})
         symbol_of = {r.isin: r.symbol for r in rows}
 
+        ran = store.stages_ran(day)
+        views = {
+            RefusalStage.ROW6: _rebuild(day, RefusalStage.ROW6, ran.get(RefusalStage.ROW6),
+                                        store.row6_checks(day), refusals),
+            RefusalStage.ROW7: _rebuild(day, RefusalStage.ROW7, ran.get(RefusalStage.ROW7),
+                                        store.row7_result(day), refusals),
+        }
+
         lines = _header(day, run, next_day)
-        lines += _refusals(refusals, symbol_of)
+        lines += _refusals(refusals, symbol_of, views)
         lines += _flags(rows, forecasts, refusals)
-        lines += _row6(store.row6_checks(day), refusals, symbol_of)
-        lines += _row7(store.row7_result(day), refusals, symbol_of)
+        lines += _row6(views[RefusalStage.ROW6], symbol_of)
+        lines += _row7(views[RefusalStage.ROW7], symbol_of)
         lines += _tomorrow(next_day, forecasts, refusals, symbol_of)
         lines += _watch(rows, official, rules)
         lines += _checks(store.reconciliation(day))
@@ -295,10 +364,17 @@ def _header(day: dt.date, run: RunRecord, next_day: dt.date | None) -> list[str]
             f"Run `{run.run_id[:8]}` {run.outcome.value}, {target}.", ""]
 
 
-def _refusals(refusals: tuple[Refusal, ...], symbol_of: Mapping[str, str]) -> list[str]:
+def _refusals(refusals: tuple[Refusal, ...], symbol_of: Mapping[str, str],
+              views: Mapping[RefusalStage, StageView]) -> list[str]:
+    """Every refusal for D, by stage. A marked stage that is inconsistent comes first, since
+    the store contradicts itself there (#023 item 8), and one that did not run comes last."""
     out = ["## 1. Refusals", ""]
-    if not refusals:
+    inconsistent = [v for v in views.values() if v.inconsistent]
+    not_run = [v for v in views.values() if not v.inconsistent and v.outcome is None]
+    if not refusals and not inconsistent and not not_run:
         return out + ["None. Every stage ran.", ""]
+    for v in inconsistent:
+        out.append(f"- **{v.stage.value}** inconsistent: {v.inconsistent}")
     for stage in RefusalStage:
         mine = [r for r in refusals if r.stage is stage]
         whole = [r for r in mine if r.subject == ""]
@@ -310,6 +386,8 @@ def _refusals(refusals: tuple[Refusal, ...], symbol_of: Mapping[str, str]) -> li
             reasons = sorted({r.reason for r in each})
             out.append(f"- **{stage.value}** refused for {len(each)} scrip(s): {names} "
                        f"({'; '.join(reasons)})")
+    for v in not_run:
+        out.append(f"- **{v.stage.value}** not run: no record that this stage ran.")
     return out + [""]
 
 
@@ -334,11 +412,17 @@ def _flags(rows, forecasts, refusals) -> list[str]:
     return out + [""]
 
 
-def _row6(checks, refusals, symbol_of) -> list[str]:
+def _row6(view: StageView, symbol_of) -> list[str]:
+    """Row 6 (SPEC row 6). Not run, inconsistent, refused, flat, or checked (#023)."""
     out = ["## 3. Row 6 breaches", ""]
-    stage = _whole_stage(refusals, RefusalStage.ROW6)
-    if stage is not None:
-        return out + [f"Refused: {stage.reason}.", ""]
+    line = _not_settled(view)
+    if line is not None:
+        return out + [line, ""]
+    if view.outcome.status is StageStatus.FLAT:
+        return out + [ROW6_FLAT, ""]
+    checks = view.outcome.checks
+    if not checks:
+        return out + [ROW6_NONE_HELD, ""]
     breaches = [c for c in checks if not c.permitted]
     if not breaches:
         return out + [f"None: {len(checks)} account-scrip check(s), every one permitted.", ""]
@@ -353,20 +437,20 @@ def _qty(d: Decimal) -> str:
     return f"{d.normalize():f}"
 
 
-def _row7(result: EntityLimitResult, refusals, symbol_of) -> list[str]:
-    """Entity limits (SPEC row 7). Three states, never merged: refused, checked, and nothing
-    stored. The last is a flat book or a run from before row 7 existed, and the store cannot
-    yet tell which (#016 addendum 2, follow-up 4a), so the report says both."""
+def _row7(view: StageView, symbol_of) -> list[str]:
+    """Entity limits (SPEC row 7). Not run, inconsistent, refused, flat, or checked, never
+    merged. A flat book and a run that never reached row 7 used to look the same; the marker
+    tells them apart now (#023, settling #022's follow-up 4a)."""
     out = ["## 4. Row 7: entity limits", ""]
-    stage = _whole_stage(refusals, RefusalStage.ROW7)
-    if stage is not None:
-        return out + [f"Refused: {stage.reason}.", ""]
-    per_scrip = {r.subject: r.reason for r in refusals
-                 if r.stage is RefusalStage.ROW7 and r.subject != ""}
+    line = _not_settled(view)
+    if line is not None:
+        return out + [line, ""]
+    if view.outcome.status is StageStatus.FLAT:
+        return out + [ROW7_FLAT, ""]
+    # CHECKED: Row7Outcome guarantees a non-empty result and one refusal per no-MWPL scrip.
+    result = view.outcome.result
+    per_scrip = {r.subject: r.reason for r in view.outcome.refusals}
     checks, not_checked = result.checks, result.not_checked
-    if not checks and not not_checked and not per_scrip:
-        return out + ["Nothing checked, and no refusal recorded: either the book held nothing "
-                      "that day, or this run predates row 7.", ""]
 
     breaches = result.breaches
     if breaches:

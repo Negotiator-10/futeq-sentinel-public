@@ -1,13 +1,13 @@
 """The report's row 7 section (section 4). Layout, by Claude, 12 Nov 2026.
 
-The first group calls `_row7()` directly on stored-shape values and passes now. The second
-renders a day through the runner, so it waits on the row 7 stage, as `test_runner_row7.py`'s
-stage tests do.
+The first group calls `_row7()` directly, on a view `_rebuild()` makes from stored-shape values
+and a marker's status. The second renders a day through the runner.
 
 The rule the section keeps is #019's: refused is never zero. A whole-stage refusal says
-"Refused:" and why; a scrip refused for want of an MWPL is named, with the holders it affected;
-and nothing stored with no refusal is said as that, not as "0 breaches", because the store cannot
-yet tell a flat book from a run that predates row 7.
+"Refused:" and why; a scrip refused for want of an MWPL is named, with the holders it affected.
+Updated 13 Nov 2026 for #023: nothing stored with no marker is "Not run", never "0 breaches",
+and a flat day says "Nothing held" from its marker. The marker cases are in
+`test_report_stage_ran.py`.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from decimal import Decimal
 from sentinel import report
 from sentinel.engine import EntityLimitCheck, EntityLimitResult, LimitCause, NotChecked
 from sentinel.entities import TM_COMBINED_LIMIT_KEY, Category
-from sentinel.store import Refusal, RefusalStage
+from sentinel.store import Refusal, RefusalStage, StageStatus
 from tests.test_report import stand_ins  # noqa: F401  (a fixture, used by name)
 from tests.test_runner_row7 import D13, NO_MWPL, QUIET, row7_paths, run
 
@@ -38,30 +38,33 @@ def a_check(holder, limit_key, g, limit, *, cause=None, reason="within limit"):
         cause=cause, reason=reason)
 
 
-def section(result=EntityLimitResult(()), refusals=()) -> str:
-    return "\n".join(report._row7(result, tuple(refusals), SYMBOLS))
+def section(result=EntityLimitResult(()), refusals=(), status=StageStatus.CHECKED) -> str:
+    """Section 4 for a marker `status` (None = no marker) over these rows and refusals."""
+    view = report._rebuild(D13, RefusalStage.ROW7, status, result, tuple(refusals))
+    return "\n".join(report._row7(view, SYMBOLS))
 
 
 # -- the section on its own (passes now) -------------------------------------------------
 
 
 def test_a_whole_stage_refusal_says_refused_and_why_never_zero():
-    text = section(refusals=[Refusal(D13, RefusalStage.ROW7, "", "missing: holders.csv")])
+    text = section(refusals=[Refusal(D13, RefusalStage.ROW7, "", "missing: holders.csv")],
+                   status=StageStatus.REFUSED)
     assert "Refused: missing: holders.csv." in text
-    assert "None" not in text and "0 " not in text and "Nothing checked" not in text
+    assert "None" not in text and "0 " not in text and "Not run" not in text
 
 
-def test_nothing_stored_and_no_refusal_is_said_as_that_not_as_none():
-    text = section()
-    assert "Nothing checked, and no refusal recorded" in text
-    assert "predates row 7" in text
-    assert "None:" not in text
+def test_no_marker_and_nothing_stored_is_not_run_not_none():
+    text = section(status=None)
+    assert report.NOT_RUN in text
+    assert "None:" not in text and "Nothing held" not in text
 
 
 def test_another_stages_refusal_is_not_read_as_row_7s():
-    text = section(refusals=[Refusal(D13, RefusalStage.ROW6, "", "missing: positions.csv")])
-    assert "Refused" not in text
-    assert "Nothing checked, and no refusal recorded" in text
+    text = section(refusals=[Refusal(D13, RefusalStage.ROW6, "", "missing: positions.csv")],
+                   status=None)
+    assert "Refused" not in text and "Inconsistent" not in text
+    assert report.NOT_RUN in text
 
 
 def test_checks_that_all_pass_give_their_count():
@@ -99,7 +102,7 @@ def test_only_scrips_refused_and_no_checks_say_none_could_be_made():
     refusal = Refusal(D13, RefusalStage.ROW7, NO_MWPL, "no MWPL in today's combineoi; 1 checks not made")
     text = section(result, [refusal])
     assert "No check could be made." in text
-    assert "Nothing checked, and no refusal" not in text and "None:" not in text
+    assert "Not run" not in text and "None:" not in text
 
 
 # -- through the runner (waits on the row 7 stage) ---------------------------------------
@@ -126,4 +129,4 @@ def test_a_rendered_refusal_says_refused(tmp_path, stand_ins):
     run(paths, D13)
     row7 = row7_of(report.render(D13, paths))
     assert "Refused: missing: holders.csv." in row7
-    assert "None" not in row7 and "Nothing checked" not in row7
+    assert "None" not in row7 and "Not run" not in row7

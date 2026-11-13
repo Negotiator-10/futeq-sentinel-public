@@ -34,9 +34,10 @@ times a person wants to read a day by eye.
 
 **The runner's tables (#019).** A run on D writes its results through `day_transaction()`, one
 SQLite transaction that every writer joins, so a crash part-way leaves nothing of D behind
-(decision 3). Six result tables accept writes *only* inside it - `measurement`, `reconciliation`,
-`row6_check`, `row7_check`, `row7_not_checked`, `refusal` - and each row carries the `run_id` that
-wrote it. Inside the transaction
+(decision 3). Seven result tables accept writes *only* inside it - `measurement`, `reconciliation`,
+`row6_check`, `row7_check`, `row7_not_checked`, `refusal`, and `stage_ran`, the marker that row 6
+or row 7 reached an outcome (#023) - and each row carries the `run_id` that wrote it. Inside the
+transaction
 for D, `ban_state` takes D's `official` state and the *next trading day's* `forecast` and nothing
 else: the two writes #011 says a run on D makes.
 
@@ -75,6 +76,7 @@ from sentinel.runlock import RunLock
 __all__ = [
     "Source", "StateRecord", "WriteResult", "BanStateStore", "StoreError",
     "RunOutcome", "RunRecord", "RefusalStage", "Refusal", "ReconciliationSummary",
+    "StageStatus", "MARKED_STAGES",
 ]
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -173,6 +175,23 @@ class RefusalStage(Enum):
     RECONCILIATION = "reconciliation"
     ROW6 = "row6"
     ROW7 = "row7"            # entity limits (#016); added 12 Nov 2026
+
+
+class StageStatus(Enum):
+    """The outcome a stage reached on D, stored as its `stage_ran` marker (#023).
+
+    "Not run" is not a status: it is no marker in the store, and None in `DayResults.row6` or
+    `DayResults.row7`. Defined here beside `RefusalStage`, not in the runner, because the
+    marker's table holds these values and the store cannot import the runner.
+    """
+
+    CHECKED = "checked"    # the stage ran its check; row 6's may hold zero checks, row 7's not
+    FLAT = "flat"          # every book the stage checks is PropBook.flat(): nothing was held
+    REFUSED = "refused"    # the whole stage refused; there is no result
+
+
+#: The stages that write a `stage_ran` marker (#023). The table's CHECK lists exactly these.
+MARKED_STAGES = (RefusalStage.ROW6, RefusalStage.ROW7)
 
 
 @dataclass(frozen=True)
@@ -379,6 +398,16 @@ CREATE TABLE IF NOT EXISTS refusal (
     written_at  TEXT    NOT NULL,
     PRIMARY KEY (trade_date, stage, subject)
 ) WITHOUT ROWID;
+
+-- #023: one marker per stage per day, from the stage's own outcome. No marker = not run.
+CREATE TABLE IF NOT EXISTS stage_ran (
+    trade_date  TEXT    NOT NULL,
+    stage       TEXT    NOT NULL CHECK (stage IN ('row6','row7')),
+    status      TEXT    NOT NULL CHECK (status IN ('checked','flat','refused')),
+    run_id      TEXT    NOT NULL REFERENCES run_log (run_id),
+    written_at  TEXT    NOT NULL,
+    PRIMARY KEY (trade_date, stage)
+) WITHOUT ROWID;
 """
 
 
@@ -391,10 +420,29 @@ class BanStateStore:
         self._conn = sqlite3.connect(self.path, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
+        self._refuse_a_store_without_markers()
         self._conn.executescript(_SCHEMA)
         self._refuse_an_old_format()
         #: The open day transaction, as (trade_date, run_id), or None.
         self._txn: tuple[dt.date, str] | None = None
+
+    def _refuse_a_store_without_markers(self) -> None:
+        """A store whose runs predate `stage_ran` (#023) is refused, before the schema runs.
+
+        Its days hold row 6 and row 7 rows with no marker, which #023 item 7 reads as
+        inconsistent, so every one of them would report that way. Checked before
+        CREATE TABLE IF NOT EXISTS, because once that has run the table exists, empty, and the
+        next open could not tell this store from a new one. The remedy is the other two old
+        formats': move it aside and re-run its days."""
+        tables = {r["name"] for r in self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if "run_log" in tables and "stage_ran" not in tables:
+            self._conn.close()
+            raise StoreError(
+                f"{self.path}: this store has a run log but no stage_ran table, so its runs "
+                f"predate stage markers (#023, 13 Nov 2026) and every row 6 and row 7 result in "
+                f"it would read as inconsistent. Move it aside and re-run its days to rebuild it."
+            )
 
     def _refuse_an_old_format(self) -> None:
         """A store created before 11 Nov 2026 keeps `measurement.futeq_oi` as REAL, because the
@@ -423,6 +471,19 @@ class BanStateStore:
             raise StoreError(
                 f"{self.path}: the refusal table does not accept stage(s) {', '.join(missing)}. "
                 f"This store predates them, so their first refusal would roll back the whole day. "
+                f"Move it aside and re-run its days to rebuild it."
+            )
+        # The same trap for stage_ran's CHECKs, the day a stage or a status is added.
+        marker_sql = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'stage_ran'"
+        ).fetchone()["sql"]
+        missing = [v for v in (*(s.value for s in MARKED_STAGES), *(s.value for s in StageStatus))
+                   if f"'{v}'" not in marker_sql]
+        if missing:
+            self._conn.close()
+            raise StoreError(
+                f"{self.path}: the stage_ran table does not accept {', '.join(missing)}. This "
+                f"store predates them, so their first marker would roll back the whole day. "
                 f"Move it aside and re-run its days to rebuild it."
             )
 
@@ -902,6 +963,37 @@ class BanStateStore:
         return self._insert_results("refusal", ("trade_date", "stage", "subject"), values,
                                     day, run_id)
 
+    def record_stage_ran(self, day: dt.date, stage: RefusalStage,
+                         status: StageStatus) -> WriteResult:
+        """The marker that `stage` reached `status` on `day` (#023). Called by `write_day()`
+        from the stage's own outcome, never unconditionally.
+
+        An identical re-run is a no-op, as for every result table. A re-run whose status
+        differs is refused here, before `_insert_results()`, so the error can say which stage
+        moved and from what: the day would otherwise hold the old status's rows beside the new
+        one's (#022's correction), and only v1.0's supersede may replace a day.
+        """
+        if not isinstance(stage, RefusalStage) or stage not in MARKED_STAGES:
+            raise StoreError(
+                f"stage_ran for {day}: {stage!r} is not a stage that writes a marker; "
+                f"only {', '.join(s.value for s in MARKED_STAGES)} do (#023)")
+        if not isinstance(status, StageStatus):
+            raise StoreError(
+                f"stage_ran for {day}: status must be a StageStatus, not {type(status).__name__}")
+        run_id = self._require_txn(day)
+        prior = self._conn.execute(
+            "SELECT status FROM stage_ran WHERE trade_date = ? AND stage = ?",
+            (day.isoformat(), stage.value)).fetchone()
+        if prior is not None and prior["status"] != status.value:
+            raise StoreError(
+                f"stage_ran for {day}: {stage.value} was {prior['status']}, now {status.value}. "
+                f"A re-run that changes a stage's outcome would leave both on the day. Re-run "
+                f"{day} into a fresh store until v1.0's supersede exists (#023 item 6).")
+        return self._insert_results(
+            "stage_ran", ("trade_date", "stage"),
+            [{"trade_date": day.isoformat(), "stage": stage.value, "status": status.value}],
+            day, run_id)
+
     def _insert_results(
         self, table: str, key: tuple[str, ...], values: list[dict], day: dt.date, run_id: str,
     ) -> WriteResult:
@@ -1017,6 +1109,14 @@ class BanStateStore:
         ).fetchall()
         return tuple(Refusal(trade_date=day, stage=RefusalStage(r["stage"]), subject=r["subject"],
                              reason=r["reason"]) for r in rows)
+
+    def stages_ran(self, day: dt.date) -> dict[RefusalStage, StageStatus]:
+        """D's stage markers (#023). A stage missing from the dict has no marker: not run.
+        Whether the marker agrees with the stage's rows is the report's check, made by
+        rebuilding the stage's outcome type, which the store cannot import."""
+        return {RefusalStage(r["stage"]): StageStatus(r["status"]) for r in self._conn.execute(
+            "SELECT stage, status FROM stage_ran WHERE trade_date = ? ORDER BY stage",
+            (day.isoformat(),)).fetchall()}
 
     # -- reading. `official` only, by design ----------------------------------------------
 
