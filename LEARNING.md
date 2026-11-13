@@ -309,6 +309,20 @@ and a D-1 MWPL that differs. The final pass killed 33 of 33.
 *Changes:* a check that the normal path never triggers needs its own
 test that does.
 
+## 13 Nov 2026
+
+**1. A surviving mutant can mean the code is safe twice, not that a test is weak.**
+Two of #023's 30 mutants survived. Both removed a guard that is redundant on purpose:
+writing markers before rows, and checking `status is CHECKED` before writing row 6's
+checks, which FLAT's `()` and REFUSED's `None` already prevent. Neither can change
+behaviour today.
+*Changes:* for each survivor I ask "could any input make this matter?" If not, I keep
+the guard, write its reason in a comment, and record why the survivor is accepted.
+
+**2. Docs go stale the same way code does, and they need the same check.**
+SPEC rows 6 and 7 cited tests that never existed. Nothing ran them, so nothing failed.
+*Changes:* every test name in SPEC is checked against tests/ before the public rebuild.
+
 ## Gaps list
 Questions from teach-backs that need more work. Strike them out once you can answer them
 without notes.
