@@ -173,11 +173,17 @@ Expanded here one week at a time, when we get to it. See `PLAN.md` for the outli
   - [x] **Row 7 in the runner and the report**, 12 Nov (`b4754f2`, #022): my
     `_entity_limit_stage()` and `Row7Outcome`; Claude's plumbing, report section 4 and tests.
     604 tests, 33 of 33 mutants killed. Samples re-rendered (`57ecd85`)
-  - [ ] **#023 `stage_ran`**, next, in a fresh session: a marker per stage per day, written from
+  - [x] **#023 `stage_ran`**, 13 Nov (`d7ff95c`): a marker per stage per day, written from
     the stage's own outcome, for row 6 and row 7, so a flat day and a run from before the stage
-    stop looking the same
-  - [ ] **Finish row 7's docs before the public rebuild:** `SPEC.md` row 7's status, and the
-    README's prop-book bullet ("not the check itself") and report order, which still miss row 7
+    stop looking the same. My `Row6Outcome`, `_row6()` and `write_day()`; Claude's table, report
+    and tests. 689 tests, 28 of 30 mutants killed, the 2 survivors redundant on purpose
+  - [x] **Finish row 7's docs before the public rebuild**, 13 Nov (`3ccddbd`, `43c5e31`):
+    `SPEC.md` row 7's status and tests, the README's prop-book bullet and report order, and SPEC
+    row 6's test names
+  - [ ] **SPEC's test names, before the public rebuild** (found 13 Nov; not today). 16 tests SPEC
+    quotes are for functions not written: mark each "Planned: <function> not written", as row 1
+    now is. Row 4's `test_ban_entry_is_eod_only` does not exist although `is_in_ban()` does: name
+    the real `is_in_ban()` tests instead, checked against `tests/`
   - [ ] Deltas by Path B (#021 item 3): Claude's file reader and comparison harness, then my
     Black-76
 - [ ] Week 4 (Thu 19 to Wed 25 Nov): validation against NSE, entity limits, alerts
